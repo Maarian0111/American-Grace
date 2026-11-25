@@ -1,9 +1,11 @@
 import { useDeferredValue, useMemo, useState } from 'react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { api } from './lib/api.js';
 import { formatCOP, priceForTariff } from './lib/format.js';
 
 const CATEGORIES = ['Todas', 'Niña', 'Niño/Unisex', 'Accesorios'];
+const GENEROS = ['Niña', 'Niño/Unisex', 'Accesorios'];
 const TARIFFS = [
   { id: 'tienda', label: 'Tienda' },
   { id: 'mayorista', label: 'Mayorista' },
@@ -27,10 +29,17 @@ async function loadImageDataUrl(url) {
   }
 }
 
+function pageFileFor(entry, pageNum) {
+  if (entry?.file) return entry.file;
+  const nn = String(pageNum).padStart(2, '0');
+  return `page-${nn}.png`;
+}
+
 export default function CatalogBuilder({
   items,
   source,
   onSync,
+  onMoveGenero,
   syncing,
 }) {
   const [query, setQuery] = useState('');
@@ -40,6 +49,7 @@ export default function CatalogBuilder({
   const [tariff, setTariff] = useState('tienda');
   const [message, setMessage] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [movingId, setMovingId] = useState(null);
 
   const filtered = useMemo(() => {
     const q = deferredQuery.trim().toLowerCase();
@@ -157,6 +167,87 @@ export default function CatalogBuilder({
     }
   }
 
+  async function exportCanvaPersonalPdf() {
+    const rows = selectedItems();
+    if (!rows.length) {
+      setMessage('Selecciona prendas para el catálogo personal.');
+      return;
+    }
+    setExporting(true);
+    setMessage('Armando PDF desde páginas Canva…');
+    try {
+      const { map, localPages } = await api.canvaMap();
+      const byRef = map?.byReferencia || {};
+      const localSet = new Set((localPages || []).map((f) => f.toLowerCase()));
+      const missingMap = [];
+      const missingFile = [];
+      const pages = [];
+
+      for (const item of rows) {
+        const entry = byRef[item.referencia];
+        const page = entry?.page;
+        if (!page) {
+          missingMap.push(item.referencia);
+          continue;
+        }
+        const file = pageFileFor(entry, page);
+        if (!localSet.has(file.toLowerCase())) {
+          // also try .jpg
+          const alt = file.replace(/\.png$/i, '.jpg');
+          if (localSet.has(alt.toLowerCase())) {
+            pages.push({ item, page, file: alt });
+            continue;
+          }
+          missingFile.push(`${item.referencia}→${file}`);
+          continue;
+        }
+        pages.push({ item, page, file });
+      }
+
+      if (!pages.length) {
+        setMessage(
+          `Sin páginas Canva listas. Falta mapa: ${missingMap.slice(0, 8).join(', ') || '—'}; ` +
+            `falta archivo: ${missingFile.slice(0, 8).join(', ') || '—'}. ` +
+            'Exporta PNG a /canva-pages/ y completa data/canva-page-map.json (ver README).'
+        );
+        return;
+      }
+
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      let first = true;
+
+      for (const p of pages) {
+        const dataUrl = await loadImageDataUrl(`/canva-pages/${p.file}`);
+        if (!dataUrl) {
+          missingFile.push(`${p.item.referencia}→${p.file}`);
+          continue;
+        }
+        if (!first) doc.addPage();
+        first = false;
+        const fmt = String(dataUrl).startsWith('data:image/png') ? 'PNG' : 'JPEG';
+        // fill page, keep aspect via fit
+        doc.addImage(dataUrl, fmt, 0, 0, pageW, pageH, undefined, 'FAST');
+      }
+
+      if (first) {
+        setMessage('No se pudieron cargar las imágenes Canva exportadas.');
+        return;
+      }
+
+      doc.save(`catalogo-personal-canva-${pages.length}p.pdf`);
+      const parts = [`PDF Canva personal: ${pages.length} página(s)`];
+      if (missingMap.length) parts.push(`sin mapa: ${missingMap.length}`);
+      if (missingFile.length) parts.push(`sin archivo: ${missingFile.length}`);
+      setMessage(parts.join(' · '));
+    } catch (err) {
+      setMessage(`Error PDF Canva: ${err.message}`);
+    } finally {
+      setExporting(false);
+    }
+  }
+
   function printCatalog() {
     window.print();
   }
@@ -168,6 +259,26 @@ export default function CatalogBuilder({
       setMessage(`Sincronizado: ${result.count} ítems (${result.source}).`);
     } catch (err) {
       setMessage(`Error al sincronizar: ${err.message}`);
+    }
+  }
+
+  async function handleMoveGenero(item, genero) {
+    if (!onMoveGenero || genero === item.genero) return;
+    setMovingId(item.id);
+    setMessage('');
+    try {
+      const result = await onMoveGenero(item, genero);
+      if (result.unchanged) {
+        setMessage(`${item.referencia_ag || item.referencia} ya estaba en ${genero}.`);
+      } else {
+        setMessage(
+          `Movido ${item.referencia_ag || item.referencia}: ${result.from} → ${result.to}.`
+        );
+      }
+    } catch (err) {
+      setMessage(`No se pudo mover: ${err.message}`);
+    } finally {
+      setMovingId(null);
     }
   }
 
@@ -201,6 +312,15 @@ export default function CatalogBuilder({
         </button>
         <button type="button" className="btn" onClick={exportPdf} disabled={exporting}>
           {exporting ? 'PDF…' : 'Exportar PDF'}
+        </button>
+        <button
+          type="button"
+          className="btn secondary"
+          onClick={exportCanvaPersonalPdf}
+          disabled={exporting}
+          title="Compone páginas exportadas de Canva según data/canva-page-map.json"
+        >
+          PDF Canva personal
         </button>
         <button type="button" className="btn ghost" onClick={printCatalog}>
           Imprimir
@@ -281,7 +401,20 @@ export default function CatalogBuilder({
                   <td>{item.descripcion}</td>
                   <td>{item.tallas}</td>
                   <td>
-                    <span className="badge">{item.genero}</span>
+                    <select
+                      className="genero-select no-print"
+                      value={item.genero || 'Niña'}
+                      disabled={movingId === item.id || !item.id}
+                      onChange={(e) => handleMoveGenero(item, e.target.value)}
+                      aria-label={`Mover ${item.referencia_ag || item.referencia} de sección`}
+                    >
+                      {GENEROS.map((g) => (
+                        <option key={g} value={g}>
+                          {g}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="badge print-only">{item.genero}</span>
                   </td>
                   <td>{formatCOP(priceForTariff(item, tariff))}</td>
                   <td>{item.stock}</td>

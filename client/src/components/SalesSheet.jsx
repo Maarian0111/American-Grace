@@ -212,6 +212,31 @@ export default function SalesSheet({ sellers, catalog }) {
     }
   }
 
+  async function runImport(dryRun) {
+    setMessage(dryRun ? 'Simulando importación…' : 'Importando ventas (sin borrar las existentes)…');
+    try {
+      const data = await api.importSales(dryRun);
+      if (dryRun) {
+        setMessage(
+          `Dry-run: ${data.wouldImportLines}/${data.sourceRows} líneas nuevas → ` +
+            `${data.wouldCreateSales} ventas; omitidas existentes: ${data.skippedExisting}. ` +
+            `Gaps: ${JSON.stringify(data.gapSummary || {})}` +
+            (data.uniqueRefsMissing?.length
+              ? `; refs fuera de catálogo: ${data.uniqueRefsMissing.join(', ')}`
+              : '')
+        );
+      } else {
+        setMessage(
+          `Importado: ${data.importedLines} líneas en ${data.importedSales} ventas ` +
+            `(omitidas: ${data.skippedExisting}; fuente ${data.source}).`
+        );
+        await load();
+      }
+    } catch (err) {
+      setMessage(`Import error: ${err.message}`);
+    }
+  }
+
   function exportPdf() {
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
     doc.setFontSize(16);
@@ -458,6 +483,12 @@ export default function SalesSheet({ sellers, catalog }) {
         <a className="btn ghost" href={api.exportSalesXlsxUrl({ from, to, seller_id: sellerId })}>
           XLSX
         </a>
+        <button type="button" className="btn ghost" onClick={() => runImport(true)}>
+          Dry-run import
+        </button>
+        <button type="button" className="btn secondary" onClick={() => runImport(false)}>
+          Importar hoja
+        </button>
       </div>
 
       <div className="table-wrap">

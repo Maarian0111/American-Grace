@@ -1,0 +1,321 @@
+{
+  "design": {
+    "title": "Catálogo AG 2026 Con Precios",
+    "canvaLink": "https://canva.link/8ockpjdctcec9zr",
+    "designUrl": "https://www.canva.com/design/DAHV78HJ17k/pzYYk-On78W7is23mEqq5g/view",
+    "designId": "DAHV78HJ17k",
+    "pageCount": 27,
+    "blocked": "Canva Connect API / screen export requires Marian auth; CF challenges block automated page download from this VM."
+  },
+  "filePattern": "page-{NN}.png",
+  "pages": {
+    "1": {
+      "file": "page-01.png",
+      "notes": "Likely cover/intro — confirm after export"
+    },
+    "2": {
+      "file": "page-02.png",
+      "notes": null
+    },
+    "3": {
+      "file": "page-03.png",
+      "notes": null
+    },
+    "4": {
+      "file": "page-04.png",
+      "notes": null
+    },
+    "5": {
+      "file": "page-05.png",
+      "notes": null
+    },
+    "6": {
+      "file": "page-06.png",
+      "notes": null
+    },
+    "7": {
+      "file": "page-07.png",
+      "notes": null
+    },
+    "8": {
+      "file": "page-08.png",
+      "notes": null
+    },
+    "9": {
+      "file": "page-09.png",
+      "notes": null
+    },
+    "10": {
+      "file": "page-10.png",
+      "notes": null
+    },
+    "11": {
+      "file": "page-11.png",
+      "notes": null
+    },
+    "12": {
+      "file": "page-12.png",
+      "notes": null
+    },
+    "13": {
+      "file": "page-13.png",
+      "notes": null
+    },
+    "14": {
+      "file": "page-14.png",
+      "notes": null
+    },
+    "15": {
+      "file": "page-15.png",
+      "notes": null
+    },
+    "16": {
+      "file": "page-16.png",
+      "notes": null
+    },
+    "17": {
+      "file": "page-17.png",
+      "notes": null
+    },
+    "18": {
+      "file": "page-18.png",
+      "notes": null
+    },
+    "19": {
+      "file": "page-19.png",
+      "notes": null
+    },
+    "20": {
+      "file": "page-20.png",
+      "notes": null
+    },
+    "21": {
+      "file": "page-21.png",
+      "notes": null
+    },
+    "22": {
+      "file": "page-22.png",
+      "notes": null
+    },
+    "23": {
+      "file": "page-23.png",
+      "notes": null
+    },
+    "24": {
+      "file": "page-24.png",
+      "notes": null
+    },
+    "25": {
+      "file": "page-25.png",
+      "notes": null
+    },
+    "26": {
+      "file": "page-26.png",
+      "notes": null
+    },
+    "27": {
+      "file": "page-27.png",
+      "notes": null
+    }
+  },
+  "byReferencia": {
+    "S20144-BBS": {
+      "referencia_ag": "ALBA DRESS",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "S18302-VV": {
+      "referencia_ag": "ALEX SET",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "S726N": {
+      "referencia_ag": "ALVIN SHORT",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "F19164": {
+      "referencia_ag": "ANGEL SHIRT",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "S19123-VV": {
+      "referencia_ag": "BLOOM DRESS",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "S053PF": {
+      "referencia_ag": "BOSTON DRESS",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "S25M401": {
+      "referencia_ag": "BUBBLE",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "S17162": {
+      "referencia_ag": "CARLA SET",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "F17602-SO": {
+      "referencia_ag": "CASEY SET",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "S25M801": {
+      "referencia_ag": "CHAR DRESS",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "F16113GT-Y02": {
+      "referencia_ag": "CORTIS JEAN",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "S22M854D": {
+      "referencia_ag": "DREAMER SUNSUIT",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "F20108SL": {
+      "referencia_ag": "FLOWER DRESS",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "S208-BBS": {
+      "referencia_ag": "GRACE BUBBLE",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "F829GT": {
+      "referencia_ag": "GREEN BLAZER",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "S17176GT": {
+      "referencia_ag": "JESSIE SHORT",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "S726GT": {
+      "referencia_ag": "JOE SHORT",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "S17170-VV": {
+      "referencia_ag": "KATE SHIRT",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "S089GT": {
+      "referencia_ag": "KIM PANT",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "F21K304GT": {
+      "referencia_ag": "KITTY SKIRT",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "F17112T": {
+      "referencia_ag": "LIA DRESS",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "F18108WT": {
+      "referencia_ag": "LILY DRESS",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "S731T": {
+      "referencia_ag": "NOAH",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "F200SG": {
+      "referencia_ag": "OLIVER SHIRT",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "S155": {
+      "referencia_ag": "RILEY SHIRT",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "S18302PF": {
+      "referencia_ag": "RUBY SET",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "F200-BBS": {
+      "referencia_ag": "SIMON L-SHIRT",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "S16209D": {
+      "referencia_ag": "SKY DRESS",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "S21M952": {
+      "referencia_ag": "SWEET BUBBLE",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "F22M100-P": {
+      "referencia_ag": "TAYLOR SHIRT",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "S23M804BB": {
+      "referencia_ag": "TEO SHORT",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "B405C": {
+      "referencia_ag": "CORREA CLÁSICA",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    },
+    "B405FC": {
+      "referencia_ag": "CORREA FC",
+      "page": null,
+      "file": null,
+      "notes": "Set page (1-based) after exporting Canva pages into public/canva-pages/"
+    }
+  }
+}

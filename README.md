@@ -68,10 +68,13 @@ DDL cannot be applied with the anon key alone; use the SQL Editor (or a real DB 
 | GET | `/api/health` | Mode: `local` \| `supabase` |
 | GET | `/api/catalog` | List catalog items |
 | POST | `/api/catalog/seed` | Upsert seed JSON → Supabase / local |
+| PATCH | `/api/catalog/:id` | Move garment section (`genero`) |
+| GET | `/api/canva/map` | Canva page map + local page files |
 | GET | `/api/sellers` | List sellers |
 | POST | `/api/sellers` | Add seller |
 | GET | `/api/sales` | List/filter sales (`from`, `to`, `seller_id`, `estado`) |
 | POST | `/api/sales` | Create sale + history |
+| POST | `/api/sales/import` | Import sheet CSV (`dry_run` default true) |
 | GET | `/api/sales/:id` | Sale detail |
 | PUT | `/api/sales/:id` | Edit / cambio / estado + audit |
 | GET | `/api/sales/:id/history` | Change history |
@@ -81,8 +84,10 @@ DDL cannot be applied with the anon key alone; use the SQL Editor (or a real DB 
 
 - Hybrid catalog (local seed + Sync)
 - Real-time search + category filter (Niña / Niño-Unisex / Accesorios)
-- Multi-tariff PDF catalog (tienda / mayorista / consignación)
+- Move garments between sections (persists `catalog_items.genero`)
+- Multi-tariff PDF catalog + personal Canva-page PDF (offline export path)
 - Sales sheet with date/seller filters, edit & garment exchange audit
+- Historical sales import from `data/imports/ventas-sheet.csv` (`npm run import-sales`)
 - PDF + XLSX sales export
 - Manual payment status (Bancolombia extension point in schema + UI comments)
 - Product photos via `/catalog-photos/…`
@@ -105,8 +110,17 @@ Catalog prices extracted from `Lista_de_precios_AG.pdf`. Stock totals merged fro
   render.yaml
   .env.example
   data/catalog-seed.json
+  data/canva-page-map.json
+  data/imports/ventas-sheet.csv
+  lib/ventas-import.js
+  scripts/import-sales.mjs
   sql/schema.sql
   public/catalog-photos/
-  client/          # Vite React app
+  public/canva-pages/   # Marian: export Canva PNGs here
+  client/               # Vite React app
   README.md
 ```
+
+## Canva personal catalog
+
+Design: [canva.link/8ockpjdctcec9zr](https://canva.link/8ockpjdctcec9zr) (*Catálogo AG 2026 Con Precios*, 27 pages). Automated page download needs Canva auth; export PNGs into `public/canva-pages/` and fill `data/canva-page-map.json` — see `public/canva-pages/README.md`.

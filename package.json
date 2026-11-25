@@ -7,7 +7,9 @@
     "start": "node server.js",
     "dev": "node server.js",
     "build": "npm run build --prefix client",
-    "postinstall": "npm install --prefix client"
+    "postinstall": "npm install --prefix client",
+    "import-sales": "node scripts/import-sales.mjs",
+    "import-sales:apply": "node scripts/import-sales.mjs --apply"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",

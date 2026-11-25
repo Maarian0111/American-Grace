@@ -49,6 +49,13 @@ export default function App() {
     }
   }
 
+  async function moveGenero(item, genero) {
+    if (!item?.id) throw new Error('ítem sin id');
+    const result = await api.moveGenero(item.id, genero);
+    await loadCatalog();
+    return result;
+  }
+
   return (
     <div className="app-shell">
       <header className="hero">
@@ -97,6 +104,7 @@ export default function App() {
           items={items}
           source={catalogSource}
           onSync={syncCatalog}
+          onMoveGenero={moveGenero}
           syncing={syncing}
         />
       ) : null}

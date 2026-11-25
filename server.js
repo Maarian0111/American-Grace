@@ -8,10 +8,16 @@ const fs = require('fs');
 const express = require('express');
 const cors = require('cors');
 const XLSX = require('xlsx');
+const {
+  buildImportPlan,
+  loadDefaultCsv,
+} = require('./lib/ventas-import');
 
 const PORT = Number(process.env.PORT) || 5000;
 const SEED_PATH = path.join(__dirname, 'data', 'catalog-seed.json');
 const LOCAL_DB_PATH = path.join(__dirname, 'data', 'local-db.json');
+const CANVA_MAP_PATH = path.join(__dirname, 'data', 'canva-page-map.json');
+const GENEROS = new Set(['Niña', 'Niño/Unisex', 'Accesorios']);
 
 const hasSupabase =
   Boolean(process.env.SUPABASE_URL) &&
@@ -45,7 +51,8 @@ function defaultLocalDb() {
     sales: [],
     sale_items: [],
     sale_change_history: [],
-    _seqs: { sales: 1, sale_items: 1, history: 1, sellers: 5 },
+    catalog_change_history: [],
+    _seqs: { sales: 1, sale_items: 1, history: 1, sellers: 5, catalog_history: 1 },
   };
 }
 
@@ -625,6 +632,317 @@ const photosDir = path.join(__dirname, 'public', 'catalog-photos');
 if (fs.existsSync(photosDir)) {
   app.use('/catalog-photos', express.static(photosDir, { maxAge: '7d' }));
 }
+
+/* Canva page exports for personal catalogs */
+const canvaPagesDir = path.join(__dirname, 'public', 'canva-pages');
+if (!fs.existsSync(canvaPagesDir)) fs.mkdirSync(canvaPagesDir, { recursive: true });
+app.use('/canva-pages', express.static(canvaPagesDir, { maxAge: '1d' }));
+
+/* Move garment between catalog sections (genero) */
+app.patch('/api/catalog/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const genero = String(req.body?.genero || '').trim();
+  const note = String(req.body?.note || req.body?.context || '').trim();
+  const changedBy = String(req.body?.changed_by || 'sistema').trim();
+  if (!GENEROS.has(genero)) {
+    return res.status(400).json({
+      error: `genero must be one of: ${[...GENEROS].join(', ')}`,
+    });
+  }
+  try {
+    if (supabase) {
+      const { data: before, error: bErr } = await supabase
+        .from('catalog_items')
+        .select('*')
+        .eq('id', id)
+        .single();
+      if (bErr) throw bErr;
+      if (!before) return res.status(404).json({ error: 'not found' });
+      if (before.genero === genero) {
+        return res.json({
+          source: 'supabase',
+          item: before,
+          unchanged: true,
+        });
+      }
+      const { data: updated, error } = await supabase
+        .from('catalog_items')
+        .update({ genero, updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .select()
+        .single();
+      if (error) throw error;
+      // Mirror locally + tiny audit trail
+      const db = readLocal();
+      const local = db.catalog_items.find((c) => c.id === id || c.referencia === before.referencia);
+      if (local) local.genero = genero;
+      if (!Array.isArray(db.catalog_change_history)) db.catalog_change_history = [];
+      if (!db._seqs.catalog_history) db._seqs.catalog_history = 1;
+      db.catalog_change_history.push({
+        id: db._seqs.catalog_history++,
+        catalog_item_id: id,
+        referencia: before.referencia,
+        action: 'genero_move',
+        changed_by: changedBy,
+        before_data: { genero: before.genero },
+        after_data: { genero },
+        context: note || `Movido de ${before.genero} → ${genero}`,
+        created_at: new Date().toISOString(),
+      });
+      writeLocal(db);
+      return res.json({
+        source: 'supabase',
+        item: updated,
+        from: before.genero,
+        to: genero,
+      });
+    }
+
+    const db = readLocal();
+    const item = db.catalog_items.find((c) => c.id === id);
+    if (!item) return res.status(404).json({ error: 'not found' });
+    const from = item.genero;
+    if (from === genero) {
+      return res.json({ source: 'local', item, unchanged: true });
+    }
+    item.genero = genero;
+    item.updated_at = new Date().toISOString();
+    if (!Array.isArray(db.catalog_change_history)) db.catalog_change_history = [];
+    if (!db._seqs.catalog_history) db._seqs.catalog_history = 1;
+    db.catalog_change_history.push({
+      id: db._seqs.catalog_history++,
+      catalog_item_id: id,
+      referencia: item.referencia,
+      action: 'genero_move',
+      changed_by: changedBy,
+      before_data: { genero: from },
+      after_data: { genero },
+      context: note || `Movido de ${from} → ${genero}`,
+      created_at: new Date().toISOString(),
+    });
+    writeLocal(db);
+    res.json({ source: 'local', item, from, to: genero });
+  } catch (err) {
+    console.error('[catalog patch]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/catalog/:id/history', async (req, res) => {
+  const id = Number(req.params.id);
+  const db = readLocal();
+  const history = (db.catalog_change_history || [])
+    .filter((h) => h.catalog_item_id === id)
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  res.json({ source: 'local', history });
+});
+
+/* Canva personal-catalog mapping */
+app.get('/api/canva/map', (_req, res) => {
+  try {
+    if (!fs.existsSync(CANVA_MAP_PATH)) {
+      return res.status(404).json({ error: 'canva-page-map.json missing' });
+    }
+    const map = JSON.parse(fs.readFileSync(CANVA_MAP_PATH, 'utf8'));
+    const pagesDir = path.join(__dirname, 'public', 'canva-pages');
+    const files = fs.existsSync(pagesDir)
+      ? fs.readdirSync(pagesDir).filter((f) => /\.(png|jpe?g|webp)$/i.test(f))
+      : [];
+    res.json({
+      map,
+      localPages: files,
+      pagesReady: files.length,
+      designPageCount: map?.design?.pageCount || null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* Import historical sales (upsert-style: skip existing dedup keys; never wipe) */
+app.post('/api/sales/import', async (req, res) => {
+  const dryRun = req.body?.dry_run !== false; // default true
+  try {
+    const csv = loadDefaultCsv(__dirname);
+    let catalogItems = [];
+    let existingSales = [];
+
+    if (supabase) {
+      const { data: cat, error: cErr } = await supabase.from('catalog_items').select('*');
+      if (cErr) throw cErr;
+      catalogItems = cat || [];
+      const { data: sales, error: sErr } = await supabase
+        .from('sales')
+        .select('*, sale_items(*)');
+      if (sErr) throw sErr;
+      existingSales = (sales || []).map((s) => ({
+        ...s,
+        items: s.sale_items || [],
+      }));
+    } else {
+      const db = readLocal();
+      catalogItems = db.catalog_items;
+      existingSales = db.sales.map((s) => ({
+        ...s,
+        items: db.sale_items.filter((i) => i.sale_id === s.id),
+      }));
+    }
+
+    const plan = buildImportPlan(csv, catalogItems, existingSales);
+    if (dryRun) {
+      return res.json({
+        ok: true,
+        dry_run: true,
+        source: supabase ? 'supabase' : 'local',
+        sourceRows: plan.sourceRows,
+        wouldImportLines: plan.newLineCount,
+        wouldCreateSales: plan.salesToCreate.length,
+        skippedExisting: plan.skippedExisting,
+        gapSummary: plan.gapSummary,
+        uniqueRefsMissing: plan.uniqueRefsMissing,
+        sampleSale: plan.salesToCreate[0] || null,
+      });
+    }
+
+    // Ensure sellers exist
+    const sellerNames = [
+      ...new Set(
+        plan.salesToCreate
+          .map((s) => s.vendedor_nombre)
+          .filter(Boolean)
+          .map((n) => String(n).trim())
+      ),
+    ];
+    const sellerIdByName = new Map();
+    if (supabase) {
+      const { data: sellers } = await supabase.from('sellers').select('*');
+      for (const s of sellers || []) sellerIdByName.set(s.name.toLowerCase(), s.id);
+      for (const name of sellerNames) {
+        if (sellerIdByName.has(name.toLowerCase())) continue;
+        const { data: created, error } = await supabase
+          .from('sellers')
+          .insert({ name, active: true })
+          .select()
+          .single();
+        if (!error && created) {
+          sellerIdByName.set(name.toLowerCase(), created.id);
+          const db = readLocal();
+          if (!db.sellers.find((x) => x.name.toLowerCase() === name.toLowerCase())) {
+            db.sellers.push(created);
+            writeLocal(db);
+          }
+        }
+      }
+    } else {
+      for (const name of sellerNames) {
+        const db = readLocal();
+        let seller = db.sellers.find((s) => s.name.toLowerCase() === name.toLowerCase());
+        if (!seller) {
+          const created = addSellerLocal(name);
+          if (!created.error) seller = created;
+        }
+        if (seller) sellerIdByName.set(name.toLowerCase(), seller.id);
+      }
+    }
+
+    let importedSales = 0;
+    let importedLines = 0;
+    const createdIds = [];
+
+    for (const saleBody of plan.salesToCreate) {
+      const sellerId = saleBody.vendedor_nombre
+        ? sellerIdByName.get(saleBody.vendedor_nombre.toLowerCase()) || null
+        : null;
+      const payload = {
+        fecha_venta: saleBody.fecha_venta,
+        seller_id: sellerId,
+        vendedor_nombre: saleBody.vendedor_nombre,
+        estado_pago: saleBody.estado_pago,
+        fecha_pago: saleBody.fecha_pago,
+        notas: saleBody.notas,
+        items: saleBody.items.map((it) => ({
+          catalog_item_id: it.catalog_item_id,
+          referencia: it.referencia,
+          descripcion: it.descripcion,
+          talla: it.talla,
+          cantidad: it.cantidad,
+          precio_unitario: it.precio_unitario,
+          tariff: it.tariff || 'tienda',
+        })),
+        changed_by: 'import:ventas-sheet',
+      };
+
+      // Reuse create paths
+      const total = payload.items.reduce(
+        (sum, it) => sum + Number(it.precio_unitario || 0) * Number(it.cantidad || 1),
+        0
+      );
+
+      if (supabase) {
+        const { data: sale, error } = await supabase
+          .from('sales')
+          .insert({
+            fecha_venta: payload.fecha_venta,
+            seller_id: payload.seller_id,
+            vendedor_nombre: payload.vendedor_nombre,
+            cliente: null,
+            estado_pago: payload.estado_pago || 'PENDIENTE',
+            fecha_pago: payload.fecha_pago || null,
+            notas: payload.notas || null,
+            total,
+            payment_provider: null,
+          })
+          .select()
+          .single();
+        if (error) throw error;
+        const itemRows = payload.items.map((it) => ({
+          sale_id: sale.id,
+          catalog_item_id: it.catalog_item_id || null,
+          referencia: it.referencia,
+          descripcion: it.descripcion,
+          talla: it.talla,
+          cantidad: Number(it.cantidad || 1),
+          precio_unitario: Number(it.precio_unitario || 0),
+          tariff: it.tariff || 'tienda',
+        }));
+        const { error: iErr } = await supabase.from('sale_items').insert(itemRows);
+        if (iErr) throw iErr;
+        await supabase.from('sale_change_history').insert({
+          sale_id: sale.id,
+          action: 'create',
+          changed_by: 'import:ventas-sheet',
+          before_data: null,
+          after_data: { ...sale, items: itemRows },
+          context: 'Import hoja AG INVENTARIO VENTAS',
+        });
+        createdIds.push(sale.id);
+        importedSales += 1;
+        importedLines += itemRows.length;
+      } else {
+        const after = createSaleLocal(payload, payload.items, total);
+        createdIds.push(after.id);
+        importedSales += 1;
+        importedLines += (after.items || []).length;
+      }
+    }
+
+    res.json({
+      ok: true,
+      dry_run: false,
+      source: supabase ? 'supabase' : 'local',
+      sourceRows: plan.sourceRows,
+      importedSales,
+      importedLines,
+      skippedExisting: plan.skippedExisting,
+      gapSummary: plan.gapSummary,
+      uniqueRefsMissing: plan.uniqueRefsMissing,
+      createdIds,
+    });
+  } catch (err) {
+    console.error('[sales import]', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
 /* Apply image_url map (from PDF extract or sheet sync) */
 app.post('/api/catalog/images', async (req, res) => {

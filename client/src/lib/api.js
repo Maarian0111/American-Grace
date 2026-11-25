@@ -20,6 +20,12 @@ export const api = {
   health: () => request('/api/health'),
   catalog: () => request('/api/catalog'),
   seedCatalog: () => request('/api/catalog/seed', { method: 'POST' }),
+  moveGenero: (id, genero, extra = {}) =>
+    request(`/api/catalog/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ genero, ...extra }),
+    }),
+  canvaMap: () => request('/api/canva/map'),
   sellers: () => request('/api/sellers'),
   addSeller: (name) =>
     request('/api/sellers', { method: 'POST', body: JSON.stringify({ name }) }),
@@ -35,6 +41,11 @@ export const api = {
   updateSale: (id, body) =>
     request(`/api/sales/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   saleHistory: (id) => request(`/api/sales/${id}/history`),
+  importSales: (dryRun = true) =>
+    request('/api/sales/import', {
+      method: 'POST',
+      body: JSON.stringify({ dry_run: dryRun }),
+    }),
   exportSalesXlsxUrl: (params = {}) => {
     const q = new URLSearchParams(
       Object.entries(params).filter(([, v]) => v !== '' && v != null)

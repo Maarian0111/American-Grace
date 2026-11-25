@@ -289,8 +289,26 @@ table.data tr:hover td {
   background: #faf6f1;
 }
 
-.badge {
-  display: inline-block;
+.genero-select {
+  max-width: 9.5rem;
+  padding: 0.25rem 0.4rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--white);
+  color: var(--ink);
+}
+
+.print-only {
+  display: none;
+}
+
+@media print {
+  .print-only {
+    display: inline;
+  }
+}
+
+.badge {  display: inline-block;
   padding: 0.2rem 0.55rem;
   border-radius: 999px;
   font-size: 0.78rem;
