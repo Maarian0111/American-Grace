@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: american-grace
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build --prefix client
+    startCommand: npm start
+    envVars:
+      # Render usually injects PORT; set explicitly only if needed (app defaults to 5000).
+      - key: PORT
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
