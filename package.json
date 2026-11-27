@@ -9,7 +9,9 @@
     "build": "npm run build --prefix client",
     "postinstall": "npm install --prefix client",
     "import-sales": "node scripts/import-sales.mjs",
-    "import-sales:apply": "node scripts/import-sales.mjs --apply"
+    "import-sales:apply": "node scripts/import-sales.mjs --apply",
+    "dedupe-sales": "node scripts/dedupe-sales.mjs",
+    "dedupe-sales:apply": "node scripts/dedupe-sales.mjs --apply --vendedor=Alejandra"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",

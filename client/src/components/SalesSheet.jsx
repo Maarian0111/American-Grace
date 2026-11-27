@@ -25,7 +25,7 @@ const emptyForm = () => ({
   items: [{ referencia: '', descripcion: '', talla: '', cantidad: 1, precio_unitario: 0, catalog_item_id: null }],
 });
 
-export default function SalesSheet({ sellers, catalog }) {
+export default function SalesSheet({ sellers, catalog, onOpenHistory }) {
   const [sales, setSales] = useState([]);
   const [source, setSource] = useState('');
   const [from, setFrom] = useState('');
@@ -35,8 +35,6 @@ export default function SalesSheet({ sellers, catalog }) {
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
-  const [history, setHistory] = useState([]);
-  const [showHistory, setShowHistory] = useState(false);
   const [message, setMessage] = useState('');
   const [actionMode, setActionMode] = useState('create'); // create | edit | cambio
 
@@ -202,16 +200,6 @@ export default function SalesSheet({ sellers, catalog }) {
     }
   }
 
-  async function openHistory(saleId) {
-    try {
-      const data = await api.saleHistory(saleId);
-      setHistory(data.history || []);
-      setShowHistory(true);
-    } catch (err) {
-      setMessage(err.message);
-    }
-  }
-
   async function runImport(dryRun) {
     setMessage(dryRun ? 'Simulando importación…' : 'Importando ventas (sin borrar las existentes)…');
     try {
@@ -234,6 +222,30 @@ export default function SalesSheet({ sellers, catalog }) {
       }
     } catch (err) {
       setMessage(`Import error: ${err.message}`);
+    }
+  }
+
+  async function runDedupe(dryRun) {
+    setMessage(
+      dryRun
+        ? 'Buscando ventas duplicadas (Alejandra / todas)…'
+        : 'Eliminando duplicados verdaderos (se conserva la más antigua)…'
+    );
+    try {
+      const data = await api.dedupeSales({ dryRun, vendedor: 'Alejandra' });
+      if (dryRun) {
+        setMessage(
+          `Dedupe dry-run: ${data.duplicateGroups} grupo(s), ` +
+            `borraría ${data.wouldDelete} venta(s), conserva ids ${(data.wouldKeep || []).join(', ') || '—'}.`
+        );
+      } else {
+        setMessage(
+          `Dedupe aplicado: eliminadas ${data.deleted} venta(s) en ${data.duplicateGroups} grupo(s).`
+        );
+        await load();
+      }
+    } catch (err) {
+      setMessage(`Dedupe error: ${err.message}`);
     }
   }
 
@@ -489,6 +501,12 @@ export default function SalesSheet({ sellers, catalog }) {
         <button type="button" className="btn secondary" onClick={() => runImport(false)}>
           Importar hoja
         </button>
+        <button type="button" className="btn ghost" onClick={() => runDedupe(true)}>
+          Dry-run dedupe
+        </button>
+        <button type="button" className="btn secondary" onClick={() => runDedupe(false)}>
+          Limpiar dupes Alejandra
+        </button>
       </div>
 
       <div className="table-wrap">
@@ -538,7 +556,11 @@ export default function SalesSheet({ sellers, catalog }) {
                   <button type="button" className="btn secondary" onClick={() => startEdit(s, 'cambio')}>
                     Cambio
                   </button>
-                  <button type="button" className="btn ghost" onClick={() => openHistory(s.id)}>
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    onClick={() => onOpenHistory?.(s.id)}
+                  >
                     Historial
                   </button>
                 </td>
@@ -554,30 +576,6 @@ export default function SalesSheet({ sellers, catalog }) {
           </tbody>
         </table>
       </div>
-
-      {showHistory ? (
-        <div className="modal-backdrop" onClick={() => setShowHistory(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Historial de cambios</h3>
-            {!history.length ? <p className="muted">Sin registros</p> : null}
-            {history.map((h) => (
-              <div className="history-item" key={h.id}>
-                <strong>{h.action}</strong> · {h.changed_by || '—'} ·{' '}
-                {h.created_at ? new Date(h.created_at).toLocaleString('es-CO') : ''}
-                <div className="muted">{h.context}</div>
-                <pre>
-                  ANTES: {JSON.stringify(h.before_data, null, 2)}
-                  {'\n'}
-                  DESPUÉS: {JSON.stringify(h.after_data, null, 2)}
-                </pre>
-              </div>
-            ))}
-            <button type="button" className="btn" onClick={() => setShowHistory(false)}>
-              Cerrar
-            </button>
-          </div>
-        </div>
-      ) : null}
     </section>
   );
 }

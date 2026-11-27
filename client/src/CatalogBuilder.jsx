@@ -1,6 +1,7 @@
 import { useDeferredValue, useMemo, useState } from 'react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import GarmentForm from './components/GarmentForm.jsx';
 import { api } from './lib/api.js';
 import { formatCOP, priceForTariff } from './lib/format.js';
 
@@ -40,6 +41,7 @@ export default function CatalogBuilder({
   source,
   onSync,
   onMoveGenero,
+  onCatalogChanged,
   syncing,
 }) {
   const [query, setQuery] = useState('');
@@ -50,6 +52,9 @@ export default function CatalogBuilder({
   const [message, setMessage] = useState('');
   const [exporting, setExporting] = useState(false);
   const [movingId, setMovingId] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [editingItem, setEditingItem] = useState(null);
+  const [formBusy, setFormBusy] = useState(false);
 
   const filtered = useMemo(() => {
     const q = deferredQuery.trim().toLowerCase();
@@ -282,6 +287,41 @@ export default function CatalogBuilder({
     }
   }
 
+  function openCreate() {
+    setEditingItem(null);
+    setShowForm(true);
+  }
+
+  function openEdit(item) {
+    setEditingItem(item);
+    setShowForm(true);
+  }
+
+  function closeForm() {
+    setShowForm(false);
+    setEditingItem(null);
+  }
+
+  async function saveGarment(payload) {
+    setFormBusy(true);
+    setMessage('');
+    try {
+      if (editingItem?.id) {
+        await api.updateCatalogItem(editingItem.id, payload);
+        setMessage(`Prenda actualizada: ${payload.referencia_ag || payload.referencia}.`);
+      } else {
+        await api.createCatalogItem(payload);
+        setMessage(`Prenda creada: ${payload.referencia_ag || payload.referencia}.`);
+      }
+      closeForm();
+      await onCatalogChanged?.();
+    } catch (err) {
+      setMessage(`Error al guardar prenda: ${err.message}`);
+    } finally {
+      setFormBusy(false);
+    }
+  }
+
   return (
     <section className="panel">
       <h2>Catálogo</h2>
@@ -307,6 +347,9 @@ export default function CatalogBuilder({
             </option>
           ))}
         </select>
+        <button type="button" className="btn" onClick={openCreate}>
+          + Agregar prenda
+        </button>
         <button type="button" className="btn secondary" onClick={handleSync} disabled={syncing}>
           {syncing ? 'Sincronizando…' : 'Sync catálogo'}
         </button>
@@ -326,6 +369,22 @@ export default function CatalogBuilder({
           Imprimir
         </button>
       </div>
+
+      {showForm ? (
+        <div className="garment-form-wrap no-print">
+          <GarmentForm
+            initial={editingItem}
+            onSubmit={saveGarment}
+            onCancel={closeForm}
+            busy={formBusy}
+          />
+        </div>
+      ) : null}
+
+      {/* Future: collections / catalogs-of-garments (Canva-driven groupings) — deferred */}
+      <p className="muted no-print" style={{ fontSize: '0.82rem' }}>
+        Colecciones / catálogos personalizados de prendas: pendiente (hooks Canva listos; sin bloquear).
+      </p>
 
       <div className="chip-row no-print">
         {CATEGORIES.map((c) => (
@@ -369,6 +428,7 @@ export default function CatalogBuilder({
               <th>Género</th>
               <th>Precio</th>
               <th>Stock</th>
+              <th className="no-print"></th>
             </tr>
           </thead>
           <tbody>
@@ -418,12 +478,22 @@ export default function CatalogBuilder({
                   </td>
                   <td>{formatCOP(priceForTariff(item, tariff))}</td>
                   <td>{item.stock}</td>
+                  <td className="no-print">
+                    <button
+                      type="button"
+                      className="btn ghost"
+                      onClick={() => openEdit(item)}
+                      disabled={!item.id}
+                    >
+                      Editar
+                    </button>
+                  </td>
                 </tr>
               );
             })}
             {!filtered.length ? (
               <tr>
-                <td colSpan={9} className="empty">
+                <td colSpan={10} className="empty">
                   Sin resultados
                 </td>
               </tr>

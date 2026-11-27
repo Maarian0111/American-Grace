@@ -8,7 +8,7 @@
  * Apply via local API (server must be running):
  *   node scripts/import-sales.mjs --apply
  *
- * Or hit the API directly:
+ * Or hit the API directly (after login cookie):
  *   curl -X POST http://localhost:5000/api/sales/import -H 'content-type: application/json' -d '{"dry_run":false}'
  */
 import { createRequire } from 'module';
@@ -23,10 +23,27 @@ const { buildImportPlan, loadDefaultCsv } = require('../lib/ventas-import.js');
 const apply = process.argv.includes('--apply');
 const base = process.env.AG_API || 'http://127.0.0.1:5000';
 
+async function loginCookie() {
+  const status = await fetch(`${base}/api/auth/status`).then((r) => r.json());
+  if (status.authenticated) return '';
+  const password = process.env.APP_PASSWORD || 'american-grace';
+  const body = { password };
+  if (status.userRequired && process.env.APP_USER) body.username = process.env.APP_USER;
+  const res = await fetch(`${base}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const setCookie = res.headers.getSetCookie?.() || [];
+  const cookie = setCookie.map((c) => c.split(';')[0]).join('; ');
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'login failed');
+  return cookie;
+}
+
 async function main() {
   const csv = loadDefaultCsv(root);
   if (!apply) {
-    // Local dry-run without hitting DB — still prefer API health for catalog/sales if up
     let catalog = [];
     let sales = [];
     try {
@@ -48,15 +65,21 @@ async function main() {
       wouldImportLines: plan.newLineCount,
       wouldCreateSales: plan.salesToCreate.length,
       skippedExisting: plan.skippedExisting,
+      skippedCsvDupes: plan.skippedCsvDupes,
+      skippedByFingerprint: plan.skippedByFingerprint,
       gapSummary: plan.gapSummary,
       uniqueRefsMissing: plan.uniqueRefsMissing,
     }, null, 2));
     return;
   }
 
+  const cookie = await loginCookie();
   const res = await fetch(`${base}/api/sales/import`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(cookie ? { Cookie: cookie } : {}),
+    },
     body: JSON.stringify({ dry_run: false }),
   });
   const data = await res.json();

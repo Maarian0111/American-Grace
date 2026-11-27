@@ -11,13 +11,78 @@ const XLSX = require('xlsx');
 const {
   buildImportPlan,
   loadDefaultCsv,
+  findDuplicateSaleGroups,
 } = require('./lib/ventas-import');
+const {
+  authConfig,
+  authMiddleware,
+  credentialsOk,
+  createSessionToken,
+  sessionCookieHeader,
+  readSession,
+  DEFAULT_SOFT_PASSWORD,
+} = require('./lib/auth');
 
 const PORT = Number(process.env.PORT) || 5000;
 const SEED_PATH = path.join(__dirname, 'data', 'catalog-seed.json');
 const LOCAL_DB_PATH = path.join(__dirname, 'data', 'local-db.json');
 const CANVA_MAP_PATH = path.join(__dirname, 'data', 'canva-page-map.json');
 const GENEROS = new Set(['Niña', 'Niño/Unisex', 'Accesorios']);
+
+function suggestPricesFromTienda(tiendaRaw) {
+  const tienda = Math.round(Number(tiendaRaw) || 0);
+  return {
+    precio_tienda: tienda,
+    precio_mayorista: Math.round(tienda * 0.7), // 30% off
+    precio_consignacion: Math.round(tienda * 0.85), // 15% off
+  };
+}
+
+function normalizeCatalogBody(body = {}, { partial = false } = {}) {
+  const out = {};
+  if (body.referencia !== undefined || !partial) {
+    out.referencia = String(body.referencia || '')
+      .trim()
+      .toUpperCase();
+  }
+  if (body.referencia_ag !== undefined || !partial) {
+    out.referencia_ag = String(body.referencia_ag || body.nombre_ag || '').trim();
+  }
+  if (body.descripcion !== undefined || !partial) {
+    out.descripcion = String(body.descripcion || '').trim();
+  }
+  if (body.tallas !== undefined || !partial) {
+    out.tallas = String(body.tallas || '').trim();
+  }
+  if (body.genero !== undefined || !partial) {
+    out.genero = String(body.genero || 'Niña').trim();
+  }
+  if (body.stock !== undefined || !partial) {
+    out.stock = Number(body.stock || 0);
+  }
+  if (body.image_url !== undefined) {
+    out.image_url = body.image_url || null;
+  }
+
+  const hasTienda = body.precio_tienda !== undefined && body.precio_tienda !== '';
+  const suggested = hasTienda ? suggestPricesFromTienda(body.precio_tienda) : null;
+  if (hasTienda || !partial) {
+    out.precio_tienda = suggested
+      ? suggested.precio_tienda
+      : Math.round(Number(body.precio_tienda) || 0);
+  }
+  if (body.precio_mayorista !== undefined && body.precio_mayorista !== '') {
+    out.precio_mayorista = Math.round(Number(body.precio_mayorista) || 0);
+  } else if (suggested && !partial) {
+    out.precio_mayorista = suggested.precio_mayorista;
+  }
+  if (body.precio_consignacion !== undefined && body.precio_consignacion !== '') {
+    out.precio_consignacion = Math.round(Number(body.precio_consignacion) || 0);
+  } else if (suggested && !partial) {
+    out.precio_consignacion = suggested.precio_consignacion;
+  }
+  return out;
+}
 
 const hasSupabase =
   Boolean(process.env.SUPABASE_URL) &&
@@ -133,15 +198,62 @@ function createSaleLocal(body, items, total) {
 
 /* ─── App ───────────────────────────────────────────────────────── */
 const app = express();
-app.use(cors());
+app.use(
+  cors({
+    origin: true,
+    credentials: true,
+  })
+);
 app.use(express.json({ limit: '2mb' }));
+app.use(authMiddleware);
+
+const bootAuth = authConfig();
+if (bootAuth.softLock) {
+  console.warn(
+    `[ag] APP_PASSWORD unset — soft-lock password "${DEFAULT_SOFT_PASSWORD}" (set APP_PASSWORD in production)`
+  );
+} else {
+  console.log('[ag] Auth enabled (APP_PASSWORD set)');
+}
 
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
     mode: hasSupabase ? 'supabase' : 'local',
     port: PORT,
+    auth: bootAuth.softLock ? 'soft-lock' : 'required',
   });
+});
+
+app.get('/api/auth/status', (req, res) => {
+  const cfg = authConfig();
+  const session = readSession(req, cfg);
+  res.json({
+    ok: true,
+    authenticated: Boolean(session),
+    user: session?.u || null,
+    softLock: cfg.softLock,
+    userRequired: cfg.userRequired,
+  });
+});
+
+app.post('/api/auth/login', (req, res) => {
+  const cfg = authConfig();
+  if (!credentialsOk(req.body || {}, cfg)) {
+    return res.status(401).json({ ok: false, error: 'Credenciales incorrectas' });
+  }
+  const username =
+    String(req.body?.username || req.body?.user || '').trim() ||
+    cfg.expectedUser ||
+    'reception';
+  const token = createSessionToken(username, cfg.secret);
+  res.setHeader('Set-Cookie', sessionCookieHeader(token));
+  res.json({ ok: true, user: username, softLock: cfg.softLock });
+});
+
+app.post('/api/auth/logout', (_req, res) => {
+  res.setHeader('Set-Cookie', sessionCookieHeader('', { clear: true }));
+  res.json({ ok: true });
 });
 
 /* ─── Catalog ───────────────────────────────────────────────────── */
@@ -161,6 +273,62 @@ app.get('/api/catalog', async (_req, res) => {
     console.error(err);
     const db = readLocal();
     res.json({ source: 'local-fallback', items: db.catalog_items, warning: err.message });
+  }
+});
+
+app.post('/api/catalog', async (req, res) => {
+  const body = normalizeCatalogBody(req.body || {}, { partial: false });
+  if (!body.referencia) return res.status(400).json({ error: 'referencia required' });
+  if (!GENEROS.has(body.genero)) {
+    return res.status(400).json({
+      error: `genero must be one of: ${[...GENEROS].join(', ')}`,
+    });
+  }
+  try {
+    if (supabase) {
+      const { data, error } = await supabase
+        .from('catalog_items')
+        .insert({
+          referencia: body.referencia,
+          referencia_ag: body.referencia_ag || null,
+          descripcion: body.descripcion || null,
+          tallas: body.tallas || null,
+          genero: body.genero,
+          precio_tienda: body.precio_tienda,
+          precio_mayorista: body.precio_mayorista,
+          precio_consignacion: body.precio_consignacion,
+          stock: body.stock,
+          image_url: body.image_url || null,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      const db = readLocal();
+      if (!db.catalog_items.find((c) => c.referencia === data.referencia)) {
+        db.catalog_items.push(data);
+        writeLocal(db);
+      }
+      return res.status(201).json({ source: 'supabase', item: data });
+    }
+    const db = readLocal();
+    if (db.catalog_items.find((c) => c.referencia === body.referencia)) {
+      return res.status(409).json({ error: 'referencia already exists' });
+    }
+    const nextId =
+      db.catalog_items.reduce((m, c) => Math.max(m, Number(c.id) || 0), 0) + 1;
+    const item = {
+      id: nextId,
+      ...body,
+      image_url: body.image_url || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    db.catalog_items.push(item);
+    writeLocal(db);
+    res.status(201).json({ source: 'local', item });
+  } catch (err) {
+    console.error('[catalog create]', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -206,21 +374,22 @@ app.post('/api/catalog/seed', async (_req, res) => {
 });
 
 /* ─── Sellers ───────────────────────────────────────────────────── */
-app.get('/api/sellers', async (_req, res) => {
+app.get('/api/sellers', async (req, res) => {
+  const includeInactive = String(req.query.all || '') === '1';
   try {
     if (supabase) {
-      const { data, error } = await supabase
-        .from('sellers')
-        .select('*')
-        .eq('active', true)
-        .order('name');
+      let q = supabase.from('sellers').select('*').order('name');
+      if (!includeInactive) q = q.eq('active', true);
+      const { data, error } = await q;
       if (error) throw error;
       if (data?.length) return res.json({ source: 'supabase', sellers: data });
     }
     const db = readLocal();
     res.json({
       source: 'local',
-      sellers: db.sellers.filter((s) => s.active !== false),
+      sellers: includeInactive
+        ? db.sellers
+        : db.sellers.filter((s) => s.active !== false),
     });
   } catch (err) {
     const db = readLocal();
@@ -253,6 +422,54 @@ app.post('/api/sellers', async (req, res) => {
     const seller = addSellerLocal(name);
     if (seller.error) return res.status(409).json({ error: seller.error, warning: err.message });
     res.status(201).json({ source: 'local-fallback', seller, warning: err.message });
+  }
+});
+
+app.patch('/api/sellers/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const patch = {};
+  if (req.body?.name !== undefined) {
+    const name = String(req.body.name || '').trim();
+    if (!name) return res.status(400).json({ error: 'name required' });
+    patch.name = name;
+  }
+  if (req.body?.active !== undefined) {
+    patch.active = Boolean(req.body.active);
+  }
+  if (!Object.keys(patch).length) {
+    return res.status(400).json({ error: 'name or active required' });
+  }
+  try {
+    if (supabase) {
+      const { data, error } = await supabase
+        .from('sellers')
+        .update(patch)
+        .eq('id', id)
+        .select()
+        .single();
+      if (error) throw error;
+      const db = readLocal();
+      const local = db.sellers.find((s) => s.id === id);
+      if (local) Object.assign(local, patch);
+      writeLocal(db);
+      return res.json({ source: 'supabase', seller: data });
+    }
+    const db = readLocal();
+    const seller = db.sellers.find((s) => s.id === id);
+    if (!seller) return res.status(404).json({ error: 'not found' });
+    if (patch.name) {
+      const clash = db.sellers.find(
+        (s) => s.id !== id && s.name.toLowerCase() === patch.name.toLowerCase()
+      );
+      if (clash) return res.status(409).json({ error: 'seller already exists' });
+      seller.name = patch.name;
+    }
+    if (patch.active !== undefined) seller.active = patch.active;
+    writeLocal(db);
+    res.json({ source: 'local', seller });
+  } catch (err) {
+    console.error('[sellers patch]', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -638,17 +855,43 @@ const canvaPagesDir = path.join(__dirname, 'public', 'canva-pages');
 if (!fs.existsSync(canvaPagesDir)) fs.mkdirSync(canvaPagesDir, { recursive: true });
 app.use('/canva-pages', express.static(canvaPagesDir, { maxAge: '1d' }));
 
-/* Move garment between catalog sections (genero) */
+/* Update garment fields and/or move section (genero) */
 app.patch('/api/catalog/:id', async (req, res) => {
   const id = Number(req.params.id);
-  const genero = String(req.body?.genero || '').trim();
   const note = String(req.body?.note || req.body?.context || '').trim();
   const changedBy = String(req.body?.changed_by || 'sistema').trim();
-  if (!GENEROS.has(genero)) {
+  const fields = normalizeCatalogBody(req.body || {}, { partial: true });
+  // Drop empty referencia from accidental partial payloads
+  if (fields.referencia === '') delete fields.referencia;
+  if (fields.genero !== undefined && !GENEROS.has(fields.genero)) {
     return res.status(400).json({
       error: `genero must be one of: ${[...GENEROS].join(', ')}`,
     });
   }
+  if (!Object.keys(fields).length) {
+    return res.status(400).json({ error: 'no fields to update' });
+  }
+
+  function recordHistory(db, before, after, action) {
+    if (!Array.isArray(db.catalog_change_history)) db.catalog_change_history = [];
+    if (!db._seqs.catalog_history) db._seqs.catalog_history = 1;
+    db.catalog_change_history.push({
+      id: db._seqs.catalog_history++,
+      catalog_item_id: id,
+      referencia: after.referencia || before.referencia,
+      action,
+      changed_by: changedBy,
+      before_data: before,
+      after_data: after,
+      context:
+        note ||
+        (action === 'genero_move'
+          ? `Movido de ${before.genero} → ${after.genero}`
+          : 'Edición de prenda'),
+      created_at: new Date().toISOString(),
+    });
+  }
+
   try {
     if (supabase) {
       const { data: before, error: bErr } = await supabase
@@ -658,70 +901,67 @@ app.patch('/api/catalog/:id', async (req, res) => {
         .single();
       if (bErr) throw bErr;
       if (!before) return res.status(404).json({ error: 'not found' });
-      if (before.genero === genero) {
-        return res.json({
-          source: 'supabase',
-          item: before,
-          unchanged: true,
-        });
+
+      const onlyGenero =
+        Object.keys(fields).length === 1 && fields.genero !== undefined;
+      if (onlyGenero && before.genero === fields.genero) {
+        return res.json({ source: 'supabase', item: before, unchanged: true });
       }
+
+      const patch = { ...fields, updated_at: new Date().toISOString() };
       const { data: updated, error } = await supabase
         .from('catalog_items')
-        .update({ genero, updated_at: new Date().toISOString() })
+        .update(patch)
         .eq('id', id)
         .select()
         .single();
       if (error) throw error;
-      // Mirror locally + tiny audit trail
+
       const db = readLocal();
-      const local = db.catalog_items.find((c) => c.id === id || c.referencia === before.referencia);
-      if (local) local.genero = genero;
-      if (!Array.isArray(db.catalog_change_history)) db.catalog_change_history = [];
-      if (!db._seqs.catalog_history) db._seqs.catalog_history = 1;
-      db.catalog_change_history.push({
-        id: db._seqs.catalog_history++,
-        catalog_item_id: id,
-        referencia: before.referencia,
-        action: 'genero_move',
-        changed_by: changedBy,
-        before_data: { genero: before.genero },
-        after_data: { genero },
-        context: note || `Movido de ${before.genero} → ${genero}`,
-        created_at: new Date().toISOString(),
-      });
+      const local = db.catalog_items.find(
+        (c) => c.id === id || c.referencia === before.referencia
+      );
+      if (local) Object.assign(local, updated);
+      const action =
+        onlyGenero || (fields.genero && fields.genero !== before.genero)
+          ? Object.keys(fields).every((k) => k === 'genero')
+            ? 'genero_move'
+            : 'edit'
+          : 'edit';
+      recordHistory(db, before, updated, action);
       writeLocal(db);
       return res.json({
         source: 'supabase',
         item: updated,
         from: before.genero,
-        to: genero,
+        to: updated.genero,
       });
     }
 
     const db = readLocal();
     const item = db.catalog_items.find((c) => c.id === id);
     if (!item) return res.status(404).json({ error: 'not found' });
-    const from = item.genero;
-    if (from === genero) {
+    const before = { ...item };
+    const onlyGenero =
+      Object.keys(fields).length === 1 && fields.genero !== undefined;
+    if (onlyGenero && item.genero === fields.genero) {
       return res.json({ source: 'local', item, unchanged: true });
     }
-    item.genero = genero;
-    item.updated_at = new Date().toISOString();
-    if (!Array.isArray(db.catalog_change_history)) db.catalog_change_history = [];
-    if (!db._seqs.catalog_history) db._seqs.catalog_history = 1;
-    db.catalog_change_history.push({
-      id: db._seqs.catalog_history++,
-      catalog_item_id: id,
-      referencia: item.referencia,
-      action: 'genero_move',
-      changed_by: changedBy,
-      before_data: { genero: from },
-      after_data: { genero },
-      context: note || `Movido de ${from} → ${genero}`,
-      created_at: new Date().toISOString(),
-    });
+    Object.assign(item, fields, { updated_at: new Date().toISOString() });
+    const action =
+      onlyGenero || (fields.genero && fields.genero !== before.genero)
+        ? Object.keys(fields).every((k) => k === 'genero')
+          ? 'genero_move'
+          : 'edit'
+        : 'edit';
+    recordHistory(db, before, { ...item }, action);
     writeLocal(db);
-    res.json({ source: 'local', item, from, to: genero });
+    res.json({
+      source: 'local',
+      item,
+      from: before.genero,
+      to: item.genero,
+    });
   } catch (err) {
     console.error('[catalog patch]', err.message);
     res.status(500).json({ error: err.message });
@@ -756,6 +996,107 @@ app.get('/api/canva/map', (_req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * One-shot cleanup of true duplicate sales (same fecha + vendor + same lines).
+ * Keeps the oldest sale in each group; dry_run defaults to true.
+ * Optional body.vendedor filter (e.g. "Alejandra").
+ */
+app.post('/api/sales/dedupe', async (req, res) => {
+  const dryRun = req.body?.dry_run !== false;
+  const vendedor = String(req.body?.vendedor || '').trim() || null;
+  try {
+    let existingSales = [];
+    if (supabase) {
+      const { data: sales, error } = await supabase
+        .from('sales')
+        .select('*, sale_items(*)');
+      if (error) throw error;
+      existingSales = (sales || []).map((s) => ({
+        ...s,
+        vendedor_nombre: s.vendedor_nombre || s.sellers?.name,
+        items: s.sale_items || [],
+      }));
+    } else {
+      const db = readLocal();
+      existingSales = db.sales.map((s) => ({
+        ...s,
+        items: db.sale_items.filter((i) => i.sale_id === s.id),
+      }));
+    }
+
+    const groups = findDuplicateSaleGroups(existingSales, { vendedor });
+    const deleteIds = groups.flatMap((g) => g.deleteIds);
+    if (dryRun) {
+      return res.json({
+        ok: true,
+        dry_run: true,
+        source: supabase ? 'supabase' : 'local',
+        vendedorFilter: vendedor,
+        duplicateGroups: groups.length,
+        wouldDelete: deleteIds.length,
+        wouldKeep: groups.map((g) => g.keepId),
+        groups,
+      });
+    }
+
+    let deleted = 0;
+    if (supabase) {
+      for (const id of deleteIds) {
+        // sale_items / history cascade via FK on delete
+        const { error } = await supabase.from('sales').delete().eq('id', id);
+        if (error) throw error;
+        deleted += 1;
+      }
+      // Mirror local
+      const db = readLocal();
+      const del = new Set(deleteIds);
+      db.sales = db.sales.filter((s) => !del.has(s.id));
+      db.sale_items = db.sale_items.filter((i) => !del.has(i.sale_id));
+      db.sale_change_history = (db.sale_change_history || []).filter(
+        (h) => !del.has(h.sale_id)
+      );
+      writeLocal(db);
+    } else {
+      const db = readLocal();
+      const del = new Set(deleteIds);
+      for (const id of deleteIds) {
+        const before = saleSnapshot(db, id);
+        if (!before) continue;
+        db.sale_change_history.push({
+          id: db._seqs.history++,
+          sale_id: id,
+          action: 'delete',
+          changed_by: 'dedupe:cleanup',
+          before_data: before,
+          after_data: null,
+          context: 'Duplicate sale removed (kept oldest twin)',
+          created_at: new Date().toISOString(),
+        });
+      }
+      db.sales = db.sales.filter((s) => !del.has(s.id));
+      db.sale_items = db.sale_items.filter((i) => !del.has(i.sale_id));
+      // Keep history rows that reference deleted sales for audit; optional prune:
+      // leave them — sale_id orphan is fine in local JSON.
+      writeLocal(db);
+      deleted = deleteIds.length;
+    }
+
+    res.json({
+      ok: true,
+      dry_run: false,
+      source: supabase ? 'supabase' : 'local',
+      vendedorFilter: vendedor,
+      duplicateGroups: groups.length,
+      deleted,
+      kept: groups.map((g) => g.keepId),
+      groups,
+    });
+  } catch (err) {
+    console.error('[sales dedupe]', err.message);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
