@@ -61,11 +61,14 @@ export const api = {
   updateSale: (id, body) =>
     request(`/api/sales/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   saleHistory: (id) => request(`/api/sales/${id}/history`),
+  deleteSale: (id) => request(`/api/sales/${id}`, { method: 'DELETE' }),
+  cambios: () => request('/api/cambios'),
   importSales: (dryRun = true) =>
     request('/api/sales/import', {
       method: 'POST',
       body: JSON.stringify({ dry_run: dryRun }),
     }),
+  /** Review-only by default (dry_run true). Mass apply kept for scripts, not reception UI. */
   dedupeSales: (opts = {}) =>
     request('/api/sales/dedupe', {
       method: 'POST',

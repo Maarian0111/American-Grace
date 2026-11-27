@@ -953,6 +953,162 @@ app.get('/api/sales/:id/history', async (req, res) => {
   }
 });
 
+/** Delete one sale (manual duplicate cleanup — never mass-auto). */
+app.delete('/api/sales/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'id inválido' });
+  try {
+    if (supabase) {
+      const { data: existing, error: gErr } = await supabase
+        .from('sales')
+        .select('*, sale_items(*)')
+        .eq('id', id)
+        .maybeSingle();
+      if (gErr) throw gErr;
+      if (!existing) return res.status(404).json({ error: 'not found' });
+      const before = { ...existing, items: existing.sale_items || [] };
+      const { error: dErr } = await supabase.from('sales').delete().eq('id', id);
+      if (dErr) throw dErr;
+      // Mirror local cache if present
+      try {
+        const db = readLocal();
+        db.sales = (db.sales || []).filter((s) => s.id !== id);
+        db.sale_items = (db.sale_items || []).filter((i) => i.sale_id !== id);
+        writeLocal(db);
+      } catch {
+        /* local mirror optional */
+      }
+      return res.json({ source: 'supabase', deleted: id, before });
+    }
+
+    const db = readLocal();
+    const before = saleSnapshot(db, id);
+    if (!before) return res.status(404).json({ error: 'not found' });
+    db.sale_change_history.push({
+      id: db._seqs.history++,
+      sale_id: id,
+      action: 'delete',
+      changed_by: req.body?.changed_by || 'recepción',
+      before_data: before,
+      after_data: null,
+      context: req.body?.context || 'Venta quitada (revisión manual de duplicados)',
+      created_at: new Date().toISOString(),
+    });
+    db.sales = db.sales.filter((s) => s.id !== id);
+    db.sale_items = db.sale_items.filter((i) => i.sale_id !== id);
+    writeLocal(db);
+    res.json({ source: 'local', deleted: id, before });
+  } catch (err) {
+    console.error('[sales delete]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Mailbox of garment exchanges/edits, grouped by referencia / prenda.
+ * Ventas = day-to-day sales; this endpoint = control of cambios across sales.
+ */
+app.get('/api/cambios', async (req, res) => {
+  try {
+    let catalog = [];
+    let history = [];
+
+    if (supabase) {
+      const [{ data: cat, error: cErr }, { data: hist, error: hErr }] = await Promise.all([
+        supabase.from('catalog_items').select('*').order('referencia'),
+        supabase
+          .from('sale_change_history')
+          .select('*')
+          .in('action', ['cambio', 'edit'])
+          .order('created_at', { ascending: false }),
+      ]);
+      if (cErr) throw cErr;
+      if (hErr) throw hErr;
+      catalog = cat || [];
+      history = hist || [];
+    } else {
+      const db = readLocal();
+      catalog = [...(db.catalog_items || [])].sort((a, b) =>
+        String(a.referencia).localeCompare(String(b.referencia))
+      );
+      history = (db.sale_change_history || [])
+        .filter((h) => h.action === 'cambio' || h.action === 'edit')
+        .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+    }
+
+    function refsFromSnapshot(data) {
+      const items = data?.items || data?.sale_items || [];
+      const refs = new Set();
+      for (const it of items) {
+        const r = String(it.referencia || '')
+          .trim()
+          .toUpperCase();
+        if (r) refs.add(r);
+      }
+      return refs;
+    }
+
+    const byRef = new Map();
+    for (const c of catalog) {
+      const ref = String(c.referencia || '')
+        .trim()
+        .toUpperCase();
+      if (!ref) continue;
+      byRef.set(ref, {
+        referencia: ref,
+        referencia_ag: c.referencia_ag || c.descripcion || ref,
+        descripcion: c.descripcion || '',
+        changes: [],
+      });
+    }
+
+    for (const h of history) {
+      const refs = new Set([
+        ...refsFromSnapshot(h.before_data),
+        ...refsFromSnapshot(h.after_data),
+      ]);
+      if (!refs.size) {
+        // Orphan history without item refs — skip garment mailbox
+        continue;
+      }
+      const entry = {
+        id: h.id,
+        sale_id: h.sale_id,
+        action: h.action,
+        changed_by: h.changed_by,
+        context: h.context,
+        created_at: h.created_at,
+        before_data: h.before_data,
+        after_data: h.after_data,
+      };
+      for (const ref of refs) {
+        if (!byRef.has(ref)) {
+          byRef.set(ref, {
+            referencia: ref,
+            referencia_ag: ref,
+            descripcion: '',
+            changes: [],
+          });
+        }
+        byRef.get(ref).changes.push(entry);
+      }
+    }
+
+    const garments = [...byRef.values()].sort((a, b) =>
+      a.referencia.localeCompare(b.referencia)
+    );
+
+    res.json({
+      source: supabase ? 'supabase' : 'local',
+      garments,
+      totalChanges: history.length,
+    });
+  } catch (err) {
+    console.error('[cambios]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* Product photos (local durable paths under /catalog-photos/…) */
 const photosDir = path.join(__dirname, 'public', 'catalog-photos');
 if (fs.existsSync(photosDir)) {

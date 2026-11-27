@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import CatalogBuilder from './CatalogBuilder.jsx';
+import ChangeHistoryMailbox from './components/ChangeHistoryMailbox.jsx';
 import LoginGate from './components/LoginGate.jsx';
 import SaleHistoryView from './components/SaleHistoryView.jsx';
 import SalesSheet from './components/SalesSheet.jsx';
@@ -16,6 +17,12 @@ export default function App() {
   const [bootError, setBootError] = useState('');
   const [auth, setAuth] = useState(null);
   const [historySaleId, setHistorySaleId] = useState(null);
+  const [historyReturnTab, setHistoryReturnTab] = useState('sales');
+
+  function openSaleHistory(id, fromTab = 'sales') {
+    setHistoryReturnTab(fromTab);
+    setHistorySaleId(id);
+  }
 
   const loadCatalog = useCallback(async () => {
     const data = await api.catalog();
@@ -145,13 +152,23 @@ export default function App() {
         </button>
         <button
           type="button"
-          className={tab === 'sales' || historySaleId ? 'active' : ''}
+          className={tab === 'sales' && !historySaleId ? 'active' : ''}
           onClick={() => {
             setHistorySaleId(null);
             setTab('sales');
           }}
         >
           Ventas
+        </button>
+        <button
+          type="button"
+          className={tab === 'cambios' && !historySaleId ? 'active' : ''}
+          onClick={() => {
+            setHistorySaleId(null);
+            setTab('cambios');
+          }}
+        >
+          Historial de cambios
         </button>
         <button
           type="button"
@@ -182,9 +199,12 @@ export default function App() {
       {historySaleId ? (
         <SaleHistoryView
           saleId={historySaleId}
+          backLabel={
+            historyReturnTab === 'cambios' ? '← Volver al historial' : '← Volver a ventas'
+          }
           onBack={() => {
             setHistorySaleId(null);
-            setTab('sales');
+            setTab(historyReturnTab || 'sales');
           }}
         />
       ) : null}
@@ -204,7 +224,15 @@ export default function App() {
         <SalesSheet
           sellers={activeSellers}
           catalog={items}
-          onOpenHistory={(id) => setHistorySaleId(id)}
+          onOpenHistory={(id) => openSaleHistory(id, 'sales')}
+          onOpenCambios={() => setTab('cambios')}
+        />
+      ) : null}
+
+      {!historySaleId && tab === 'cambios' ? (
+        <ChangeHistoryMailbox
+          catalog={items}
+          onOpenSaleHistory={(id) => openSaleHistory(id, 'cambios')}
         />
       ) : null}
 

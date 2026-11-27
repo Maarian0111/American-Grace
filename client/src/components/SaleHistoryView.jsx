@@ -26,7 +26,7 @@ function summarizeSale(data) {
     .join('\n');
 }
 
-export default function SaleHistoryView({ saleId, onBack }) {
+export default function SaleHistoryView({ saleId, onBack, backLabel = '← Volver a ventas' }) {
   const [sale, setSale] = useState(null);
   const [history, setHistory] = useState([]);
   const [error, setError] = useState('');
@@ -60,13 +60,13 @@ export default function SaleHistoryView({ saleId, onBack }) {
     <section className="panel history-page">
       <div className="history-page-head">
         <button type="button" className="btn ghost" onClick={onBack}>
-          ← Volver a ventas
+          {backLabel}
         </button>
         <div>
-          <h2>Historial de venta #{saleId}</h2>
+          <h2>Detalle de venta #{saleId}</h2>
           <p className="panel-sub">
-            Vista dedicada con detalle completo antes / después de cada cambio.
-            El botón <strong>Cambio</strong> sigue en la hoja de ventas.
+            Antes / después de cada cambio en esta venta. Los cambios de prenda también
+            aparecen en <strong>Historial de cambios</strong>, agrupados por referencia.
           </p>
         </div>
       </div>

@@ -612,6 +612,103 @@ table.data tr:hover td {
   text-decoration: underline;
 }
 
+.toolbar-hint {
+  margin: 0.35rem 0 0.75rem;
+  font-size: 0.88rem;
+  color: var(--ink-soft);
+  max-width: 52rem;
+  line-height: 1.45;
+}
+
+.dupe-review {
+  margin: 1rem 0 1.25rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #faf6f1;
+  animation: rise 0.35s ease-out both;
+}
+
+.dupe-review-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.dupe-review-head h3,
+.dupe-group h4 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  margin: 0;
+}
+
+.dupe-group {
+  margin-top: 0.85rem;
+}
+
+.dupe-group + .dupe-group {
+  border-top: 1px solid var(--line);
+  padding-top: 0.85rem;
+}
+
+.garment-history-list {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.garment-history-section {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--white);
+  padding: 0.85rem 1rem 1rem;
+  animation: rise 0.4s ease-out both;
+}
+
+.garment-history-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.garment-history-head h3 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.garment-history-head .muted {
+  margin: 0.25rem 0 0;
+  font-size: 0.88rem;
+}
+
+.garment-empty {
+  margin: 0.35rem 0 0;
+  font-style: italic;
+}
+
+.garment-change-list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+}
+
+.pill-count {
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  white-space: nowrap;
+}
+
 /* Sale history page */
 .history-page-head {
   display: grid;
