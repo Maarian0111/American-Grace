@@ -2,24 +2,38 @@
 
 Boutique inventory and sales app for children’s clothing (American Grace).
 
-**GitHub:** https://github.com/Maarian0111/American-Grace
+**GitHub:** https://github.com/Maarian0111/American-Grace  
+**Live:** https://american-grace.onrender.com/
 
 ## Stack
 
 - **Root:** Node.js + Express on port `5000` (API + `client/dist`)
 - **Client:** React + Vite (`client/`)
 - **DB:** Supabase via `@supabase/supabase-js` (optional — app runs on local seed without credentials)
+- **Auth:** Simple reception gate (`APP_PASSWORD`, optional `APP_USER`) with HttpOnly session cookie
 
 ## Quick start (local)
 
 ```bash
-cp .env.example .env   # optional: fill SUPABASE_* for cloud sync
+cp .env.example .env   # optional: fill SUPABASE_* and APP_PASSWORD
 npm install            # also installs client deps (postinstall)
 npm run build --prefix client
 npm start              # http://localhost:5000
 ```
 
 Without Supabase env vars, the app uses `data/catalog-seed.json` and persists to `data/local-db.json` (gitignored).
+
+### Reception login
+
+| Env | Purpose |
+|-----|---------|
+| `APP_PASSWORD` | Required in production. Password for the login screen. |
+| `APP_USER` | Optional. If set, login also requires this username. |
+| `SESSION_SECRET` | Optional. Signs the session cookie (defaults from `APP_PASSWORD`). |
+
+If `APP_PASSWORD` is **unset**, the server uses a **soft-lock** password `american-grace` (logged at boot). Use that only for local/dev — always set a real password on Render.
+
+Mutating API routes (`POST` / `PUT` / `PATCH` / `DELETE` under `/api`) require a valid session cookie. The SPA shows a login gate before the app.
 
 ## Deploy on Render (free)
 
@@ -36,8 +50,11 @@ Without Supabase env vars, the app uses `data/catalog-seed.json` and persists to
    | `PORT` | Usually set by Render automatically; if you set it, use `5000` or match Render’s value |
    | `SUPABASE_URL` | Supabase project URL |
    | `SUPABASE_ANON_KEY` | Supabase anon / publishable key |
+   | `APP_PASSWORD` | Strong reception password (required for production) |
+   | `APP_USER` | Optional username |
+   | `SESSION_SECRET` | Optional long random string for cookie signing |
 
-5. Deploy. After the first deploy succeeds, open the service URL Render assigns.
+5. Deploy. After the first deploy succeeds, open the service URL Render assigns and log in with `APP_PASSWORD`.
 
 Optional: this repo includes [`render.yaml`](render.yaml) for Blueprint-style setup (`New` → `Blueprint`). Env values still must be entered in the Render dashboard (`sync: false`).
 
@@ -55,9 +72,10 @@ Catalog photos ship in the repo under `public/catalog-photos/` and are served at
 PORT=5000
 SUPABASE_URL=https://xxxx.supabase.co
 SUPABASE_ANON_KEY=your-anon-or-publishable-key
+APP_PASSWORD=change-me-in-production
 ```
 
-4. Restart / redeploy, open the app, click **Sync catálogo** (`POST /api/catalog/seed`).
+4. Restart / redeploy, open the app, log in, click **Sync catálogo** (`POST /api/catalog/seed`).
 
 DDL cannot be applied with the anon key alone; use the SQL Editor (or a real DB password / service role — do not put passwords in git).
 
@@ -66,15 +84,21 @@ DDL cannot be applied with the anon key alone; use the SQL Editor (or a real DB 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/health` | Mode: `local` \| `supabase` |
+| GET | `/api/auth/status` | Session status |
+| POST | `/api/auth/login` | Set session cookie |
+| POST | `/api/auth/logout` | Clear session |
 | GET | `/api/catalog` | List catalog items |
+| POST | `/api/catalog` | Create garment (auth) |
 | POST | `/api/catalog/seed` | Upsert seed JSON → Supabase / local |
-| PATCH | `/api/catalog/:id` | Move garment section (`genero`) |
+| PATCH | `/api/catalog/:id` | Edit garment / move section (`genero`) |
 | GET | `/api/canva/map` | Canva page map + local page files |
-| GET | `/api/sellers` | List sellers |
+| GET | `/api/sellers` | List sellers (`?all=1` includes inactive) |
 | POST | `/api/sellers` | Add seller |
+| PATCH | `/api/sellers/:id` | Edit name / active |
 | GET | `/api/sales` | List/filter sales (`from`, `to`, `seller_id`, `estado`) |
 | POST | `/api/sales` | Create sale + history |
 | POST | `/api/sales/import` | Import sheet CSV (`dry_run` default true) |
+| POST | `/api/sales/dedupe` | Cleanup true duplicate sales (`dry_run` default true) |
 | GET | `/api/sales/:id` | Sale detail |
 | PUT | `/api/sales/:id` | Edit / cambio / estado + audit |
 | GET | `/api/sales/:id/history` | Change history |
@@ -82,15 +106,31 @@ DDL cannot be applied with the anon key alone; use the SQL Editor (or a real DB 
 
 ## Features
 
-- Hybrid catalog (local seed + Sync)
+- Hybrid catalog (local seed + Sync) with **add/edit garment form** (3 prices: tienda / mayorista 30% off / consignación 15% off)
 - Real-time search + category filter (Niña / Niño-Unisex / Accesorios)
 - Move garments between sections (persists `catalog_items.genero`)
-- Multi-tariff PDF catalog + personal Canva-page PDF (offline export path)
-- Sales sheet with date/seller filters, edit & garment exchange audit
-- Historical sales import from `data/imports/ventas-sheet.csv` (`npm run import-sales`)
+- Multi-tariff PDF catalog + personal Canva-page PDF (offline export path; Canva files deferred)
+- Sales sheet with date/seller filters, edit & garment exchange; **dedicated per-sale history view**
+- Historical sales import from `data/imports/ventas-sheet.csv` + **dedupe cleanup** for true twins
+- Sellers: create + edit name/active
 - PDF + XLSX sales export
 - Manual payment status (Bancolombia extension point in schema + UI comments)
 - Product photos via `/catalog-photos/…`
+
+## Sales import & dedupe
+
+Fuente: pestaña VENTAS del Sheet (CSV embebido en `data/imports/ventas-sheet.csv`). Dedupe por `fecha|vendedor|ref|talla|cant` (normalizado) y por fingerprint de venta completa.
+
+```bash
+npm run import-sales              # dry-run
+npm run import-sales:apply        # apply via API
+npm run dedupe-sales              # dry-run duplicate cleanup (Alejandra filter)
+npm run dedupe-sales:apply        # delete true duplicate sales (keeps oldest)
+```
+
+UI: Ventas → **Dry-run dedupe** / **Limpiar dupes Alejandra**.
+
+If Google Sheet sharing blocks automated refresh, re-export the VENTAS tab to `data/imports/ventas-sheet.csv` manually and re-run dry-run.
 
 ## Seed source
 
@@ -112,15 +152,17 @@ Catalog prices extracted from `Lista_de_precios_AG.pdf`. Stock totals merged fro
   data/catalog-seed.json
   data/canva-page-map.json
   data/imports/ventas-sheet.csv
+  lib/auth.js
   lib/ventas-import.js
   scripts/import-sales.mjs
+  scripts/dedupe-sales.mjs
   sql/schema.sql
   public/catalog-photos/
-  public/canva-pages/   # Marian: export Canva PNGs here
+  public/canva-pages/   # Marian: export Canva PNGs here (deferred)
   client/               # Vite React app
   README.md
 ```
 
-## Canva personal catalog
+## Canva personal catalog (deferred)
 
-Design: [canva.link/8ockpjdctcec9zr](https://canva.link/8ockpjdctcec9zr) (*Catálogo AG 2026 Con Precios*, 27 pages). Automated page download needs Canva auth; export PNGs into `public/canva-pages/` and fill `data/canva-page-map.json` — see `public/canva-pages/README.md`.
+Design: [canva.link/8ockpjdctcec9zr](https://canva.link/8ockpjdctcec9zr) (*Catálogo AG 2026 Con Precios*, 27 pages). Automated page download needs Canva auth; export PNGs into `public/canva-pages/` and fill `data/canva-page-map.json` — see `public/canva-pages/README.md`. Collections / catalogs-of-garments remain a future stub.
