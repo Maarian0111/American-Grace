@@ -1019,27 +1019,41 @@ app.delete('/api/sales/:id', async (req, res) => {
 });
 
 /**
- * Mailbox of garment exchanges/edits, grouped by referencia / prenda.
- * Ventas = day-to-day sales; this endpoint = control of cambios across sales.
+ * Mailbox per prenda: associated sales + registered change history.
+ * Ventas = create/start a cambio; this endpoint = control by garment ref.
  */
 app.get('/api/cambios', async (req, res) => {
   try {
     let catalog = [];
     let history = [];
+    let sales = [];
 
     if (supabase) {
-      const [{ data: cat, error: cErr }, { data: hist, error: hErr }] = await Promise.all([
+      const [
+        { data: cat, error: cErr },
+        { data: hist, error: hErr },
+        { data: saleRows, error: sErr },
+      ] = await Promise.all([
         supabase.from('catalog_items').select('*').order('referencia'),
         supabase
           .from('sale_change_history')
           .select('*')
           .in('action', ['cambio', 'edit'])
           .order('created_at', { ascending: false }),
+        supabase
+          .from('sales')
+          .select('*, sale_items(*)')
+          .order('fecha_venta', { ascending: false }),
       ]);
       if (cErr) throw cErr;
       if (hErr) throw hErr;
+      if (sErr) throw sErr;
       catalog = cat || [];
       history = hist || [];
+      sales = (saleRows || []).map((s) => ({
+        ...s,
+        items: s.sale_items || [],
+      }));
     } else {
       const db = readLocal();
       catalog = [...(db.catalog_items || [])].sort((a, b) =>
@@ -1048,6 +1062,12 @@ app.get('/api/cambios', async (req, res) => {
       history = (db.sale_change_history || [])
         .filter((h) => h.action === 'cambio' || h.action === 'edit')
         .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+      sales = [...(db.sales || [])]
+        .map((s) => ({
+          ...s,
+          items: (db.sale_items || []).filter((i) => i.sale_id === s.id),
+        }))
+        .sort((a, b) => (a.fecha_venta < b.fecha_venta ? 1 : -1));
     }
 
     function refsFromSnapshot(data) {
@@ -1062,6 +1082,15 @@ app.get('/api/cambios', async (req, res) => {
       return refs;
     }
 
+    function lineForRef(items, ref) {
+      return (items || []).find(
+        (it) =>
+          String(it.referencia || '')
+            .trim()
+            .toUpperCase() === ref
+      );
+    }
+
     const byRef = new Map();
     for (const c of catalog) {
       const ref = String(c.referencia || '')
@@ -1072,35 +1101,105 @@ app.get('/api/cambios', async (req, res) => {
         referencia: ref,
         referencia_ag: c.referencia_ag || c.descripcion || ref,
         descripcion: c.descripcion || '',
+        tallas: c.tallas || '',
+        sales: [],
         changes: [],
       });
     }
 
-    for (const h of history) {
-      const refs = new Set([
-        ...refsFromSnapshot(h.before_data),
-        ...refsFromSnapshot(h.after_data),
-      ]);
-      if (!refs.size) {
-        // Orphan history without item refs — skip garment mailbox
-        continue;
+    // Associated sales per garment (mailbox): pick a sale to apply a cambio.
+    for (const sale of sales) {
+      const seen = new Set();
+      for (const it of sale.items || []) {
+        const ref = String(it.referencia || '')
+          .trim()
+          .toUpperCase();
+        if (!ref || seen.has(ref)) continue;
+        seen.add(ref);
+        if (!byRef.has(ref)) {
+          byRef.set(ref, {
+            referencia: ref,
+            referencia_ag: ref,
+            descripcion: it.descripcion || '',
+            tallas: '',
+            sales: [],
+            changes: [],
+          });
+        }
+        byRef.get(ref).sales.push({
+          id: sale.id,
+          fecha_venta: sale.fecha_venta,
+          vendedor_nombre: sale.vendedor_nombre,
+          cliente: sale.cliente,
+          estado_pago: sale.estado_pago,
+          total: sale.total,
+          line: {
+            referencia: it.referencia,
+            descripcion: it.descripcion,
+            talla: it.talla || '',
+            cantidad: it.cantidad,
+            precio_unitario: it.precio_unitario,
+            tariff: it.tariff || 'tienda',
+          },
+          items: (sale.items || []).map((row) => ({
+            referencia: row.referencia,
+            descripcion: row.descripcion,
+            talla: row.talla || '',
+            cantidad: row.cantidad,
+            precio_unitario: row.precio_unitario,
+            tariff: row.tariff || 'tienda',
+            catalog_item_id: row.catalog_item_id,
+          })),
+          seller_id: sale.seller_id,
+          fecha_pago: sale.fecha_pago,
+          notas: sale.notas,
+        });
       }
-      const entry = {
-        id: h.id,
-        sale_id: h.sale_id,
-        action: h.action,
-        changed_by: h.changed_by,
-        context: h.context,
-        created_at: h.created_at,
-        before_data: h.before_data,
-        after_data: h.after_data,
-      };
-      for (const ref of refs) {
+    }
+
+    for (const h of history) {
+      const beforeRefs = refsFromSnapshot(h.before_data);
+      const afterRefs = refsFromSnapshot(h.after_data);
+      const allRefs = new Set([...beforeRefs, ...afterRefs]);
+      if (!allRefs.size) continue;
+
+      const beforeItems = h.before_data?.items || h.before_data?.sale_items || [];
+      const afterItems = h.after_data?.items || h.after_data?.sale_items || [];
+
+      for (const ref of allRefs) {
+        const inBefore = beforeRefs.has(ref);
+        const inAfter = afterRefs.has(ref);
+        let role = 'edit';
+        if (h.action === 'cambio') {
+          if (inBefore && !inAfter) role = 'salió';
+          else if (!inBefore && inAfter) role = 'entró';
+          else role = 'permaneció';
+        } else if (inBefore || inAfter) {
+          role = 'edit';
+        }
+
+        // Avoid duplicate "pending" noise: edits/cambios that only touch other
+        // lines still appear, but role makes direction clear (salió vs entró).
+        const entry = {
+          id: h.id,
+          sale_id: h.sale_id,
+          action: h.action,
+          role,
+          changed_by: h.changed_by,
+          context: h.context,
+          created_at: h.created_at,
+          before_data: h.before_data,
+          after_data: h.after_data,
+          before_line: lineForRef(beforeItems, ref) || null,
+          after_line: lineForRef(afterItems, ref) || null,
+        };
         if (!byRef.has(ref)) {
           byRef.set(ref, {
             referencia: ref,
             referencia_ag: ref,
             descripcion: '',
+            tallas: '',
+            sales: [],
             changes: [],
           });
         }
@@ -1108,14 +1207,18 @@ app.get('/api/cambios', async (req, res) => {
       }
     }
 
-    const garments = [...byRef.values()].sort((a, b) =>
-      a.referencia.localeCompare(b.referencia)
-    );
+    const garments = [...byRef.values()].sort((a, b) => {
+      const aScore = (a.sales.length ? 2 : 0) + (a.changes.length ? 1 : 0);
+      const bScore = (b.sales.length ? 2 : 0) + (b.changes.length ? 1 : 0);
+      if (aScore !== bScore) return bScore - aScore;
+      return a.referencia.localeCompare(b.referencia);
+    });
 
     res.json({
       source: supabase ? 'supabase' : 'local',
       garments,
       totalChanges: history.length,
+      totalSalesLinked: garments.reduce((n, g) => n + (g.sales || []).length, 0),
     });
   } catch (err) {
     console.error('[cambios]', err.message);

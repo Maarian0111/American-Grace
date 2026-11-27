@@ -18,10 +18,40 @@ export default function App() {
   const [auth, setAuth] = useState(null);
   const [historySaleId, setHistorySaleId] = useState(null);
   const [historyReturnTab, setHistoryReturnTab] = useState('sales');
+  /** Deep-link: start a cambio on Ventas from Historial (sale + garment ref). */
+  const [cambioLaunch, setCambioLaunch] = useState(null);
+  /** Deep-link: open Historial focused on a garment (optional sale). */
+  const [cambiosFocus, setCambiosFocus] = useState(null);
 
   function openSaleHistory(id, fromTab = 'sales') {
     setHistoryReturnTab(fromTab);
     setHistorySaleId(id);
+  }
+
+  function startCambioFromMailbox({ saleId, referencia, sale }) {
+    setHistorySaleId(null);
+    setCambiosFocus(null);
+    setCambioLaunch({
+      saleId,
+      referencia: referencia ? String(referencia).toUpperCase() : null,
+      sale: sale || null,
+      nonce: Date.now(),
+    });
+    setTab('sales');
+  }
+
+  function openCambiosMailbox(focus = null) {
+    setHistorySaleId(null);
+    setCambioLaunch(null);
+    setCambiosFocus(
+      focus
+        ? {
+            referencia: focus.referencia ? String(focus.referencia).toUpperCase() : null,
+            saleId: focus.saleId || null,
+          }
+        : null
+    );
+    setTab('cambios');
   }
 
   const loadCatalog = useCallback(async () => {
@@ -225,7 +255,12 @@ export default function App() {
           sellers={activeSellers}
           catalog={items}
           onOpenHistory={(id) => openSaleHistory(id, 'sales')}
-          onOpenCambios={() => setTab('cambios')}
+          onOpenCambios={() => openCambiosMailbox()}
+          onOpenGarmentMailbox={(ref, saleId) =>
+            openCambiosMailbox({ referencia: ref, saleId })
+          }
+          cambioLaunch={cambioLaunch}
+          onCambioLaunchConsumed={() => setCambioLaunch(null)}
         />
       ) : null}
 
@@ -233,6 +268,9 @@ export default function App() {
         <ChangeHistoryMailbox
           catalog={items}
           onOpenSaleHistory={(id) => openSaleHistory(id, 'cambios')}
+          onStartCambio={startCambioFromMailbox}
+          focusRef={cambiosFocus?.referencia || null}
+          focusSaleId={cambiosFocus?.saleId || null}
         />
       ) : null}
 

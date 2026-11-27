@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
+import { formatCOP } from '../lib/format.js';
 import SaleSnapshotCards from './SaleSnapshotCards.jsx';
 
 function actionLabel(action) {
@@ -8,6 +9,11 @@ function actionLabel(action) {
   if (action === 'create') return 'Alta';
   if (action === 'estado') return 'Estado';
   return action || '—';
+}
+
+function formatTalla(talla) {
+  const t = String(talla || '').trim();
+  return t || '—';
 }
 
 export default function SaleHistoryView({ saleId, onBack, backLabel = '← Volver a ventas' }) {
@@ -62,6 +68,22 @@ export default function SaleHistoryView({ saleId, onBack, backLabel = '← Volve
       {sale ? (
         <div className="history-summary">
           <SaleSnapshotCards data={sale} title="Estado actual" tone="current" />
+          <div className="sale-lines-talla">
+            <h4>Líneas · talla</h4>
+            <ul>
+              {(sale.items || []).map((it, i) => (
+                <li key={i}>
+                  <strong>{it.referencia}</strong>
+                  {it.descripcion ? ` · ${it.descripcion}` : ''}
+                  {' · '}
+                  Talla <strong>{formatTalla(it.talla)}</strong>
+                  {' · '}×{it.cantidad || 1}
+                  {' · '}
+                  {formatCOP(it.precio_unitario)}
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
       ) : null}
 

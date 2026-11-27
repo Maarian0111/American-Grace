@@ -11,12 +11,15 @@ function Field({ label, value }) {
 }
 
 function ItemCard({ item }) {
+  const talla = String(item.talla || '').trim() || '—';
   return (
     <div className="snap-item">
       <div className="snap-item-ref">{item.referencia || '?'}</div>
       {item.descripcion ? <div className="snap-item-desc">{item.descripcion}</div> : null}
       <div className="snap-item-meta">
-        <span>Talla {item.talla || '—'}</span>
+        <span className="snap-talla">
+          Talla <strong>{talla}</strong>
+        </span>
         <span>×{item.cantidad || 1}</span>
         <span>{formatCOP(item.precio_unitario)}</span>
         {item.tariff ? <span className="snap-tariff">{tariffLabel(item.tariff)}</span> : null}
