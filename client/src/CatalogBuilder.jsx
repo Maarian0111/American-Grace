@@ -261,7 +261,12 @@ export default function CatalogBuilder({
     setMessage('');
     try {
       const result = await onSync();
-      setMessage(`Sincronizado: ${result.count} ítems (${result.source}).`);
+      const parts = [
+        `Catálogo actualizado desde seed: ${result.count} ítems (${result.source})`,
+      ];
+      if (result.updated != null) parts.push(`${result.updated} actualizados`);
+      if (result.inserted != null) parts.push(`${result.inserted} nuevos`);
+      setMessage(`${parts.join(' · ')}. No borra prendas ya usadas en ventas.`);
     } catch (err) {
       setMessage(`Error al sincronizar: ${err.message}`);
     }
@@ -350,8 +355,19 @@ export default function CatalogBuilder({
         <button type="button" className="btn" onClick={openCreate}>
           + Agregar prenda
         </button>
-        <button type="button" className="btn secondary" onClick={handleSync} disabled={syncing}>
-          {syncing ? 'Sincronizando…' : 'Sync catálogo'}
+        <button
+          type="button"
+          className="btn secondary"
+          onClick={handleSync}
+          disabled={syncing}
+          title={
+            'Actualiza precios/stock/campos desde el seed de la app (data/catalog-seed.json) y scripts opcionales. ' +
+            'NO es sincronización en vivo con Excel/Google Sheet. ' +
+            'No borra prendas que ya tienen ventas. ' +
+            'Para traer ventas nuevas del Excel usa Ventas → «Actualizar ventas desde Excel».'
+          }
+        >
+          {syncing ? 'Actualizando catálogo…' : 'Sync catálogo'}
         </button>
         <button type="button" className="btn" onClick={exportPdf} disabled={exporting}>
           {exporting ? 'PDF…' : 'Exportar PDF'}

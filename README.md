@@ -31,9 +31,9 @@ Without Supabase env vars, the app uses `data/catalog-seed.json` and persists to
 | `APP_USER` | Optional. If set, login also requires this username. |
 | `SESSION_SECRET` | Optional. Signs the session cookie (defaults from `APP_PASSWORD`). |
 
-If `APP_PASSWORD` is **unset**, the server uses a **soft-lock** password `american-grace` (logged at boot). Use that only for local/dev — always set a real password on Render.
+If `APP_PASSWORD` is **unset** locally, the server uses a **soft-lock** password `american-grace` (logged at boot) and still shows the login form. On **Render / production**, an unset `APP_PASSWORD` does **not** soft-lock: the SPA shows setup instructions until Marian adds `APP_PASSWORD` in Render Environment and redeploys.
 
-Mutating API routes (`POST` / `PUT` / `PATCH` / `DELETE` under `/api`) require a valid session cookie. The SPA shows a login gate before the app.
+Mutating API routes (`POST` / `PUT` / `PATCH` / `DELETE` under `/api`) require a valid session cookie. The SPA always shows a login (or setup) gate before the app when there is no session.
 
 ## Deploy on Render (free)
 
@@ -77,6 +77,8 @@ APP_PASSWORD=change-me-in-production
 
 4. Restart / redeploy, open the app, log in, click **Sync catálogo** (`POST /api/catalog/seed`).
 
+**Sync catálogo** upserts from `data/catalog-seed.json` by `referencia` (updates prices/stock/fields). It does **not** delete catalog rows (protects `sale_items` FK) and is **not** a live Excel/Sheet sync. Sales from Excel use Ventas → **Actualizar ventas desde Excel**.
+
 DDL cannot be applied with the anon key alone; use the SQL Editor (or a real DB password / service role — do not put passwords in git).
 
 ## API overview
@@ -89,7 +91,7 @@ DDL cannot be applied with the anon key alone; use the SQL Editor (or a real DB 
 | POST | `/api/auth/logout` | Clear session |
 | GET | `/api/catalog` | List catalog items |
 | POST | `/api/catalog` | Create garment (auth) |
-| POST | `/api/catalog/seed` | Upsert seed JSON → Supabase / local |
+| POST | `/api/catalog/seed` | Upsert seed JSON by `referencia` (never deletes catalog rows) |
 | PATCH | `/api/catalog/:id` | Edit garment / move section (`genero`) |
 | GET | `/api/canva/map` | Canva page map + local page files |
 | GET | `/api/sellers` | List sellers (`?all=1` includes inactive) |
@@ -128,9 +130,9 @@ npm run dedupe-sales              # dry-run duplicate cleanup (Alejandra filter)
 npm run dedupe-sales:apply        # delete true duplicate sales (keeps oldest)
 ```
 
-UI: Ventas → **Dry-run dedupe** / **Limpiar dupes Alejandra**.
+UI (recepción): Ventas → **Probar actualización** / **Actualizar ventas desde Excel** · **Revisar duplicados** / **Quitar ventas duplicadas**.
 
-If Google Sheet sharing blocks automated refresh, re-export the VENTAS tab to `data/imports/ventas-sheet.csv` manually and re-run dry-run.
+If Google Sheet sharing blocks automated refresh, re-export the VENTAS tab to `data/imports/ventas-sheet.csv` manually and re-run the probe.
 
 ## Seed source
 

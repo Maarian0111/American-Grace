@@ -208,20 +208,26 @@ app.use(express.json({ limit: '2mb' }));
 app.use(authMiddleware);
 
 const bootAuth = authConfig();
-if (bootAuth.softLock) {
+if (bootAuth.setupRequired) {
   console.warn(
-    `[ag] APP_PASSWORD unset — soft-lock password "${DEFAULT_SOFT_PASSWORD}" (set APP_PASSWORD in production)`
+    '[ag] APP_PASSWORD unset on production/Render — login blocked until Marian sets APP_PASSWORD in env and redeploys'
+  );
+} else if (bootAuth.softLock) {
+  console.warn(
+    `[ag] APP_PASSWORD unset — soft-lock password "${DEFAULT_SOFT_PASSWORD}" (local/dev only; set APP_PASSWORD on Render)`
   );
 } else {
   console.log('[ag] Auth enabled (APP_PASSWORD set)');
 }
 
 app.get('/api/health', (_req, res) => {
+  const cfg = authConfig();
   res.json({
     ok: true,
     mode: hasSupabase ? 'supabase' : 'local',
     port: PORT,
-    auth: bootAuth.softLock ? 'soft-lock' : 'required',
+    auth: cfg.setupRequired ? 'setup-required' : cfg.softLock ? 'soft-lock' : 'required',
+    passwordConfigured: cfg.passwordConfigured,
   });
 });
 
@@ -233,12 +239,23 @@ app.get('/api/auth/status', (req, res) => {
     authenticated: Boolean(session),
     user: session?.u || null,
     softLock: cfg.softLock,
+    setupRequired: cfg.setupRequired,
+    passwordConfigured: cfg.passwordConfigured,
+    authRequired: cfg.authRequired,
     userRequired: cfg.userRequired,
   });
 });
 
 app.post('/api/auth/login', (req, res) => {
   const cfg = authConfig();
+  if (cfg.setupRequired) {
+    return res.status(503).json({
+      ok: false,
+      error:
+        'Falta APP_PASSWORD en Render. Ve a Environment → Add Environment Variable → APP_PASSWORD, guarda y redespliega.',
+      setupRequired: true,
+    });
+  }
   if (!credentialsOk(req.body || {}, cfg)) {
     return res.status(401).json({ ok: false, error: 'Credenciales incorrectas' });
   }
@@ -332,41 +349,133 @@ app.post('/api/catalog', async (req, res) => {
   }
 });
 
+/**
+ * Upsert catalog from data/catalog-seed.json by `referencia`.
+ * NEVER deletes catalog rows (sale_items.catalog_item_id FK) — only insert/update fields.
+ * This is NOT a live Google Sheet/Excel sync; Excel sales use "Actualizar ventas".
+ */
 app.post('/api/catalog/seed', async (_req, res) => {
   try {
     const seed = loadSeedCatalog();
+    const seedRows = seed.map((s) => ({
+      referencia: String(s.referencia || '')
+        .trim()
+        .toUpperCase(),
+      referencia_ag: s.referencia_ag,
+      descripcion: s.descripcion,
+      tallas: s.tallas,
+      genero: s.genero,
+      precio_tienda: s.precio_tienda,
+      precio_mayorista: s.precio_mayorista,
+      precio_consignacion: s.precio_consignacion,
+      stock: s.stock,
+      image_url: s.image_url || null,
+    }));
+
     if (supabase) {
-      const rows = seed.map((s) => ({
-        referencia: s.referencia,
-        referencia_ag: s.referencia_ag,
-        descripcion: s.descripcion,
-        tallas: s.tallas,
-        genero: s.genero,
-        precio_tienda: s.precio_tienda,
-        precio_mayorista: s.precio_mayorista,
-        precio_consignacion: s.precio_consignacion,
-        stock: s.stock,
-        image_url: s.image_url || null,
-      }));
-      // Live table may lack UNIQUE(referencia); replace-all seed is safest
-      const { error: delErr } = await supabase
+      const { data: existing, error: fetchErr } = await supabase
         .from('catalog_items')
-        .delete()
-        .gte('id', 0);
-      if (delErr) throw delErr;
-      const { data, error } = await supabase.from('catalog_items').insert(rows).select();
-      if (error) throw error;
-      // Mirror locally
+        .select('*');
+      if (fetchErr) throw fetchErr;
+
+      const byRef = new Map(
+        (existing || []).map((row) => [String(row.referencia || '').trim().toUpperCase(), row])
+      );
+      let inserted = 0;
+      let updated = 0;
+      const mirrored = [...(existing || [])];
+
+      for (const row of seedRows) {
+        if (!row.referencia) continue;
+        const prev = byRef.get(row.referencia);
+        if (prev) {
+          const { data, error } = await supabase
+            .from('catalog_items')
+            .update({
+              referencia_ag: row.referencia_ag,
+              descripcion: row.descripcion,
+              tallas: row.tallas,
+              genero: row.genero,
+              precio_tienda: row.precio_tienda,
+              precio_mayorista: row.precio_mayorista,
+              precio_consignacion: row.precio_consignacion,
+              stock: row.stock,
+              image_url: row.image_url,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', prev.id)
+            .select()
+            .maybeSingle();
+          if (error) throw error;
+          const next = data || { ...prev, ...row };
+          const idx = mirrored.findIndex((c) => c.id === prev.id);
+          if (idx >= 0) mirrored[idx] = next;
+          byRef.set(row.referencia, next);
+          updated += 1;
+        } else {
+          const { data, error } = await supabase
+            .from('catalog_items')
+            .insert(row)
+            .select()
+            .maybeSingle();
+          if (error) throw error;
+          const next = data || { id: null, ...row };
+          mirrored.push(next);
+          byRef.set(row.referencia, next);
+          inserted += 1;
+        }
+      }
+
       const db = readLocal();
-      db.catalog_items = (data || rows).map((r, i) => ({ id: r.id || i + 1, ...r }));
+      db.catalog_items = mirrored.map((r, i) => ({ id: r.id || i + 1, ...r }));
       writeLocal(db);
-      return res.json({ ok: true, source: 'supabase', count: (data || rows).length });
+      return res.json({
+        ok: true,
+        source: 'supabase',
+        count: mirrored.length,
+        inserted,
+        updated,
+        preserved: Math.max(0, mirrored.length - inserted),
+        mode: 'upsert-by-referencia',
+        note: 'No se borran filas del catálogo (protege sale_items). No es sync en vivo de Excel.',
+      });
     }
-    // Local seed: refresh catalog only — keep sales/sellers/history intact
+
+    // Local: upsert by referencia; keep ids + orphan rows (sales FKs / local history)
     const db = readLocal();
-    db.catalog_items = seed.map((item, i) => ({ id: i + 1, ...item }));
+    const byRef = new Map(
+      (db.catalog_items || []).map((c) => [String(c.referencia || '').trim().toUpperCase(), c])
+    );
+    let nextId =
+      (db.catalog_items || []).reduce((max, c) => Math.max(max, Number(c.id) || 0), 0) + 1;
+    let inserted = 0;
+    let updated = 0;
+
+    for (const row of seedRows) {
+      if (!row.referencia) continue;
+      const prev = byRef.get(row.referencia);
+      if (prev) {
+        Object.assign(prev, row);
+        updated += 1;
+      } else {
+        const created = { id: nextId++, ...row };
+        db.catalog_items.push(created);
+        byRef.set(row.referencia, created);
+        inserted += 1;
+      }
+    }
+
     writeLocal(db);
-    res.json({ ok: true, source: 'local', count: db.catalog_items.length });
+    res.json({
+      ok: true,
+      source: 'local',
+      count: db.catalog_items.length,
+      inserted,
+      updated,
+      preserved: Math.max(0, db.catalog_items.length - inserted),
+      mode: 'upsert-by-referencia',
+      note: 'No se borran filas del catálogo. No es sync en vivo de Excel.',
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false, error: err.message });

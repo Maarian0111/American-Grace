@@ -39,13 +39,31 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        const [health, status] = await Promise.all([api.health(), refreshAuth()]);
+        const health = await api.health();
         setMode(health.mode);
+      } catch (err) {
+        setBootError(err.message);
+      }
+      try {
+        const status = await refreshAuth();
         if (status.authenticated) {
           await Promise.all([loadCatalog(), loadSellers()]);
         }
       } catch (err) {
-        setBootError(err.message);
+        // Always surface a gate: never stick on "Cargando…" if /api/auth/status fails.
+        setAuth({
+          authenticated: false,
+          softLock: false,
+          setupRequired: true,
+          passwordConfigured: false,
+          authRequired: true,
+          userRequired: false,
+          bootAuthError: err.message,
+        });
+        setBootError(
+          err.message ||
+            'No se pudo leer /api/auth/status. Si acabas de desplegar, espera el redeploy o configura APP_PASSWORD en Render.'
+        );
       }
     })();
   }, [loadCatalog, loadSellers, refreshAuth]);
@@ -91,11 +109,13 @@ export default function App() {
     );
   }
 
+  // Always show login (or Render setup instructions) until there is a session.
   if (!auth.authenticated) {
     return (
       <LoginGate
         userRequired={auth.userRequired}
         softLock={auth.softLock}
+        setupRequired={Boolean(auth.setupRequired)}
         onSuccess={handleLoginSuccess}
       />
     );
