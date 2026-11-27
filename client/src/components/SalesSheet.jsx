@@ -25,7 +25,7 @@ const emptyForm = () => ({
   items: [{ referencia: '', descripcion: '', talla: '', cantidad: 1, precio_unitario: 0, catalog_item_id: null }],
 });
 
-export default function SalesSheet({ sellers, catalog, onOpenHistory }) {
+export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCambios }) {
   const [sales, setSales] = useState([]);
   const [source, setSource] = useState('');
   const [from, setFrom] = useState('');
@@ -37,6 +37,9 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory }) {
   const [editingId, setEditingId] = useState(null);
   const [message, setMessage] = useState('');
   const [actionMode, setActionMode] = useState('create'); // create | edit | cambio
+  const [dupeGroups, setDupeGroups] = useState(null);
+  const [dupeLoading, setDupeLoading] = useState(false);
+  const [removingId, setRemovingId] = useState(null);
 
   const catalogByRef = useMemo(() => {
     const map = new Map();
@@ -55,6 +58,7 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory }) {
       });
       setSales(data.sales || []);
       setSource(data.source);
+      setMessage(`Lista actualizada desde la base de datos (${(data.sales || []).length} venta(s)).`);
     } catch (err) {
       setMessage(err.message);
     } finally {
@@ -63,7 +67,7 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory }) {
   }
 
   useEffect(() => {
-    load();
+    load().then(() => setMessage(''));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -173,7 +177,11 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory }) {
     try {
       if (editingId) {
         await api.updateSale(editingId, payload);
-        setMessage(actionMode === 'cambio' ? 'Cambio registrado con historial.' : 'Venta actualizada.');
+        setMessage(
+          actionMode === 'cambio'
+            ? 'Cambio registrado. Queda en Historial de cambios.'
+            : 'Venta actualizada.'
+        );
       } else {
         await api.createSale(payload);
         setMessage('Venta creada.');
@@ -200,57 +208,64 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory }) {
     }
   }
 
-  async function runImport(dryRun) {
-    setMessage(
-      dryRun
-        ? 'Probando qué ventas nuevas traería el Excel…'
-        : 'Actualizando ventas desde Excel (sin borrar las existentes)…'
-    );
+  async function runImport() {
+    setMessage('Actualizando ventas desde Excel (sin borrar las existentes)…');
     try {
-      const data = await api.importSales(dryRun);
-      if (dryRun) {
-        setMessage(
-          `Prueba: ${data.wouldImportLines}/${data.sourceRows} líneas nuevas → ` +
-            `${data.wouldCreateSales} ventas; ya existentes (se omiten): ${data.skippedExisting}. ` +
-            `Gaps: ${JSON.stringify(data.gapSummary || {})}` +
-            (data.uniqueRefsMissing?.length
-              ? `; refs fuera de catálogo: ${data.uniqueRefsMissing.join(', ')}`
-              : '')
-        );
-      } else {
-        setMessage(
-          `Ventas actualizadas: ${data.importedLines} líneas en ${data.importedSales} ventas ` +
-            `(omitidas: ${data.skippedExisting}; fuente ${data.source}).`
-        );
-        await load();
-      }
+      const data = await api.importSales(false);
+      setMessage(
+        `Ventas actualizadas: ${data.importedLines} líneas en ${data.importedSales} ventas ` +
+          `(omitidas: ${data.skippedExisting}; fuente ${data.source}).`
+      );
+      await load();
     } catch (err) {
       setMessage(`Error al actualizar ventas: ${err.message}`);
     }
   }
 
-  async function runDedupe(dryRun) {
-    setMessage(
-      dryRun
-        ? 'Revisando ventas duplicadas…'
-        : 'Quitando ventas duplicadas (se conserva la más antigua)…'
-    );
+  async function reviewDuplicates() {
+    setDupeLoading(true);
+    setMessage('Buscando posibles duplicados…');
     try {
-      const data = await api.dedupeSales({ dryRun, vendedor: 'Alejandra' });
-      if (dryRun) {
-        setMessage(
-          `Revisión de duplicados: ${data.duplicateGroups} grupo(s), ` +
-            `quitaría ${data.wouldDelete} venta(s), conserva ids ${(data.wouldKeep || []).join(', ') || '—'}.`
-        );
-      } else {
-        setMessage(
-          `Duplicados quitados: eliminadas ${data.deleted} venta(s) en ${data.duplicateGroups} grupo(s).`
-        );
-        await load();
-      }
+      const data = await api.dedupeSales({ dryRun: true });
+      setDupeGroups(data.groups || []);
+      setMessage(
+        data.duplicateGroups
+          ? `Posibles duplicados: ${data.duplicateGroups} grupo(s). Revisa cada fila — misma prenda puede ser de clientes distintos.`
+          : 'No se encontraron posibles duplicados.'
+      );
     } catch (err) {
-      setMessage(`Error al revisar/quitar duplicados: ${err.message}`);
+      setMessage(`Error al revisar duplicados: ${err.message}`);
+      setDupeGroups(null);
+    } finally {
+      setDupeLoading(false);
     }
+  }
+
+  async function removeDuplicateSale(saleId) {
+    if (!window.confirm(`¿Quitar la venta #${saleId}? Esta acción no se puede deshacer.`)) return;
+    setRemovingId(saleId);
+    try {
+      await api.deleteSale(saleId);
+      setDupeGroups((groups) =>
+        (groups || [])
+          .map((g) => ({
+            ...g,
+            sales: (g.sales || []).filter((s) => s.id !== saleId),
+            deleteIds: (g.deleteIds || []).filter((id) => id !== saleId),
+            keepId: g.keepId === saleId ? (g.sales || []).find((s) => s.id !== saleId)?.id : g.keepId,
+          }))
+          .filter((g) => (g.sales || []).length > 1)
+      );
+      setMessage(`Venta #${saleId} quitada. Pulsa Refrescar lista para confirmar la hoja.`);
+    } catch (err) {
+      setMessage(`Error al quitar venta: ${err.message}`);
+    } finally {
+      setRemovingId(null);
+    }
+  }
+
+  function dismissDupeReview() {
+    setDupeGroups(null);
   }
 
   function exportPdf() {
@@ -290,7 +305,8 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory }) {
     <section className="panel">
       <h2>Hoja de ventas</h2>
       <p className="panel-sub">
-        Crear, filtrar, editar y registrar cambios con auditoría completa. Fuente: {source || '—'}
+        Ventas del día a día: crear, filtrar, editar y registrar un <strong>Cambio</strong> de prenda.
+        El control de cambios está en <strong>Historial de cambios</strong>. Fuente: {source || '—'}
       </p>
 
       <form onSubmit={submit}>
@@ -499,39 +515,119 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory }) {
         <a className="btn ghost" href={api.exportSalesXlsxUrl({ from, to, seller_id: sellerId })}>
           XLSX
         </a>
-        <button
-          type="button"
-          className="btn ghost"
-          onClick={() => runImport(true)}
-          title="Simula traer ventas nuevas del Excel/Sheet a la app, sin guardar cambios"
-        >
-          Probar actualización
-        </button>
+      </div>
+
+      <p className="toolbar-hint">
+        <strong>Refrescar lista</strong> vuelve a cargar las ventas desde la base de datos (no usa
+        Excel). <strong>Actualizar ventas desde Excel</strong> trae líneas nuevas del Sheet.
+        <strong> Revisar duplicados</strong> solo muestra posibles gemelas — tú decides cuál quitar.
+      </p>
+
+      <div className="toolbar">
         <button
           type="button"
           className="btn secondary"
-          onClick={() => runImport(false)}
-          title="Cuando agregas ventas en el Sheet/Excel y quieres verlas en la app (no borra las ya cargadas)"
+          onClick={load}
+          disabled={loading}
+          title="Recarga la lista de ventas desde la base de datos"
+        >
+          {loading ? 'Cargando…' : 'Refrescar lista'}
+        </button>
+        <button
+          type="button"
+          className="btn"
+          onClick={runImport}
+          title="Trae ventas nuevas del Sheet/Excel a la app (no borra las ya cargadas)"
         >
           Actualizar ventas desde Excel
         </button>
         <button
           type="button"
           className="btn ghost"
-          onClick={() => runDedupe(true)}
-          title="Muestra grupos de ventas gemelas sin borrar nada"
+          onClick={reviewDuplicates}
+          disabled={dupeLoading}
+          title="Muestra posibles ventas duplicadas para que tú elijas cuáles quitar"
         >
-          Revisar duplicados
+          {dupeLoading ? 'Revisando…' : 'Revisar duplicados'}
         </button>
-        <button
-          type="button"
-          className="btn secondary"
-          onClick={() => runDedupe(false)}
-          title="Elimina ventas duplicadas verdaderas; conserva la más antigua"
-        >
-          Quitar ventas duplicadas
-        </button>
+        {onOpenCambios ? (
+          <button type="button" className="btn ghost" onClick={onOpenCambios}>
+            Ir a Historial de cambios
+          </button>
+        ) : null}
       </div>
+
+      {dupeGroups ? (
+        <div className="dupe-review">
+          <div className="dupe-review-head">
+            <h3>Revisión de duplicados</h3>
+            <button type="button" className="btn ghost" onClick={dismissDupeReview}>
+              Cerrar revisión
+            </button>
+          </div>
+          <p className="muted">
+            Misma prenda, precio o cantidad puede ser de clientes distintos — no se borra nada
+            automáticamente. Quita solo la fila que sobra; luego pulsa <strong>Refrescar lista</strong>.
+          </p>
+          {!dupeGroups.length ? (
+            <p className="empty">Sin grupos duplicados para revisar.</p>
+          ) : (
+            dupeGroups.map((g, gi) => (
+              <div className="dupe-group" key={g.fingerprint || gi}>
+                <h4>
+                  Grupo {gi + 1} · {(g.sales || []).length} ventas parecidas
+                </h4>
+                <div className="table-wrap">
+                  <table className="data">
+                    <thead>
+                      <tr>
+                        <th>Id</th>
+                        <th>Fecha</th>
+                        <th>Vendedor</th>
+                        <th>Cliente</th>
+                        <th>Prendas</th>
+                        <th>Total</th>
+                        <th>Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(g.sales || []).map((s) => (
+                        <tr key={s.id}>
+                          <td>#{s.id}</td>
+                          <td>{s.fecha_venta}</td>
+                          <td>{s.vendedor_nombre || '—'}</td>
+                          <td>{s.cliente || '—'}</td>
+                          <td>
+                            {(s.items || []).length
+                              ? (s.items || []).map((it, i) => (
+                                  <div key={i}>
+                                    {it.referencia} · {it.talla || '—'} ×{it.cantidad}{' '}
+                                    {formatCOP(it.precio_unitario)}
+                                  </div>
+                                ))
+                              : `${s.itemCount || 0} ítem(s)`}
+                          </td>
+                          <td>{formatCOP(s.total)}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="btn ghost"
+                              disabled={removingId === s.id}
+                              onClick={() => removeDuplicateSale(s.id)}
+                            >
+                              {removingId === s.id ? 'Quitando…' : 'Quitar'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      ) : null}
 
       <div className="table-wrap">
         <table className="data">
@@ -573,20 +669,23 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory }) {
                     ))}
                   </select>
                 </td>
-                <td style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                <td style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
                   <button type="button" className="btn ghost" onClick={() => startEdit(s, 'edit')}>
                     Editar
                   </button>
                   <button type="button" className="btn secondary" onClick={() => startEdit(s, 'cambio')}>
                     Cambio
                   </button>
-                  <button
-                    type="button"
-                    className="btn ghost"
-                    onClick={() => onOpenHistory?.(s.id)}
-                  >
-                    Historial
-                  </button>
+                  {onOpenHistory ? (
+                    <button
+                      type="button"
+                      className="linkish"
+                      onClick={() => onOpenHistory(s.id)}
+                      title="Detalle de esta venta"
+                    >
+                      Ver detalle
+                    </button>
+                  ) : null}
                 </td>
               </tr>
             ))}

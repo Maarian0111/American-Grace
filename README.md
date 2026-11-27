@@ -100,10 +100,12 @@ DDL cannot be applied with the anon key alone; use the SQL Editor (or a real DB 
 | GET | `/api/sales` | List/filter sales (`from`, `to`, `seller_id`, `estado`) |
 | POST | `/api/sales` | Create sale + history |
 | POST | `/api/sales/import` | Import sheet CSV (`dry_run` default true) |
-| POST | `/api/sales/dedupe` | Cleanup true duplicate sales (`dry_run` default true) |
+| POST | `/api/sales/dedupe` | Review duplicate groups (`dry_run` default true; mass apply scripts only) |
 | GET | `/api/sales/:id` | Sale detail |
 | PUT | `/api/sales/:id` | Edit / cambio / estado + audit |
-| GET | `/api/sales/:id/history` | Change history |
+| DELETE | `/api/sales/:id` | Remove one sale (manual duplicate cleanup) |
+| GET | `/api/sales/:id/history` | Per-sale change history |
+| GET | `/api/cambios` | Historial de cambios grouped by garment referencia |
 | GET | `/api/sales/export/xlsx` | Excel export |
 
 ## Features
@@ -112,8 +114,9 @@ DDL cannot be applied with the anon key alone; use the SQL Editor (or a real DB 
 - Real-time search + category filter (Niña / Niño-Unisex / Accesorios)
 - Move garments between sections (persists `catalog_items.genero`)
 - Multi-tariff PDF catalog + personal Canva-page PDF (offline export path; Canva files deferred)
-- Sales sheet with date/seller filters, edit & garment exchange; **dedicated per-sale history view**
-- Historical sales import from `data/imports/ventas-sheet.csv` + **dedupe cleanup** for true twins
+- Sales sheet: day-to-day ventas with **Editar** / **Cambio**; refresh from DB; Excel import
+- **Historial de cambios** tab: mailbox of garment exchanges/edits by referencia
+- Review possible duplicates (per-row keep/remove — no mass auto-delete in UI)
 - Sellers: create + edit name/active
 - PDF + XLSX sales export
 - Manual payment status (Bancolombia extension point in schema + UI comments)
@@ -126,11 +129,11 @@ Fuente: pestaña VENTAS del Sheet (CSV embebido en `data/imports/ventas-sheet.cs
 ```bash
 npm run import-sales              # dry-run
 npm run import-sales:apply        # apply via API
-npm run dedupe-sales              # dry-run duplicate cleanup (Alejandra filter)
-npm run dedupe-sales:apply        # delete true duplicate sales (keeps oldest)
+npm run dedupe-sales              # review duplicate groups (Alejandra filter)
+npm run dedupe-sales:apply        # script-only mass delete of true twins (keeps oldest)
 ```
 
-UI (recepción): Ventas → **Probar actualización** / **Actualizar ventas desde Excel** · **Revisar duplicados** / **Quitar ventas duplicadas**.
+UI (recepción): Ventas → **Refrescar lista** / **Actualizar ventas desde Excel** / **Revisar duplicados** (elige quitar por fila). Tab **Historial de cambios** = control de cambios de prenda.
 
 If Google Sheet sharing blocks automated refresh, re-export the VENTAS tab to `data/imports/ventas-sheet.csv` manually and re-run the probe.
 
