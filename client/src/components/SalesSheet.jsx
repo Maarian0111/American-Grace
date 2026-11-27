@@ -37,7 +37,28 @@ const emptyForm = () => ({
   items: [emptyLine('tienda')],
 });
 
-export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCambios }) {
+function formatTalla(talla) {
+  const t = String(talla || '').trim();
+  return t || '—';
+}
+
+function tallasList(catalogItem) {
+  if (!catalogItem?.tallas) return [];
+  return String(catalogItem.tallas)
+    .split(/[,;/|]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+export default function SalesSheet({
+  sellers,
+  catalog,
+  onOpenHistory,
+  onOpenCambios,
+  onOpenGarmentMailbox,
+  cambioLaunch,
+  onCambioLaunchConsumed,
+}) {
   const [sales, setSales] = useState([]);
   const [source, setSource] = useState('');
   const [from, setFrom] = useState('');
@@ -52,6 +73,7 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCamb
   const [dupeGroups, setDupeGroups] = useState(null);
   const [dupeLoading, setDupeLoading] = useState(false);
   const [removingId, setRemovingId] = useState(null);
+  const [focusReferencia, setFocusReferencia] = useState(null);
 
   const catalogByRef = useMemo(() => {
     const map = new Map();
@@ -82,6 +104,36 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCamb
     load().then(() => setMessage(''));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** Deep-link from Historial: open the sale in Cambio mode with garment preselected. */
+  useEffect(() => {
+    if (!cambioLaunch?.nonce) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        let sale = cambioLaunch.sale || null;
+        if (!sale && cambioLaunch.saleId) {
+          const data = await api.sale(cambioLaunch.saleId);
+          sale = data.sale;
+        }
+        if (cancelled || !sale) return;
+        startEdit(sale, 'cambio');
+        setFocusReferencia(cambioLaunch.referencia || null);
+        setMessage(
+          `Cambio desde buzón de ${cambioLaunch.referencia || 'prenda'} · venta #${sale.id}. ` +
+            'Ajusta la prenda de reemplazo (incluye talla) y guarda.'
+        );
+      } catch (err) {
+        if (!cancelled) setMessage(err.message);
+      } finally {
+        onCambioLaunchConsumed?.();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cambioLaunch?.nonce]);
 
   function onSellerChange(id) {
     const s = sellers.find((x) => String(x.id) === String(id));
@@ -172,6 +224,7 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCamb
   function resetForm() {
     setEditingId(null);
     setActionMode('create');
+    setFocusReferencia(null);
     setForm(emptyForm());
   }
 
@@ -183,19 +236,30 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCamb
       setMessage('El nombre del cliente es obligatorio.');
       return;
     }
+    const lines = form.items.filter((it) => it.referencia);
+    if (!lines.length) {
+      setMessage('Agrega al menos una prenda.');
+      return;
+    }
+    const missingTalla = lines.find((it) => !String(it.talla || '').trim());
+    if (missingTalla) {
+      setMessage(
+        `Indica la talla de cada prenda (falta en ${missingTalla.referencia}).`
+      );
+      return;
+    }
     const payload = {
       ...form,
       cliente,
       seller_id: form.seller_id ? Number(form.seller_id) : null,
       fecha_pago: form.fecha_pago || null,
-      items: form.items
-        .filter((it) => it.referencia)
-        .map((it) => ({
-          ...it,
-          cantidad: Number(it.cantidad || 1),
-          precio_unitario: Number(it.precio_unitario || 0),
-          tariff: it.tariff || form.defaultTariff || 'tienda',
-        })),
+      items: lines.map((it) => ({
+        ...it,
+        talla: String(it.talla || '').trim(),
+        cantidad: Number(it.cantidad || 1),
+        precio_unitario: Number(it.precio_unitario || 0),
+        tariff: it.tariff || form.defaultTariff || 'tienda',
+      })),
       changed_by: form.vendedor_nombre || 'sistema',
       action: actionMode === 'cambio' ? 'cambio' : actionMode === 'edit' ? 'edit' : 'create',
       context:
@@ -205,16 +269,12 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCamb
             ? 'Edición de venta'
             : 'Venta creada',
     };
-    if (!payload.items.length) {
-      setMessage('Agrega al menos una prenda.');
-      return;
-    }
     try {
       if (editingId) {
         await api.updateSale(editingId, payload);
         setMessage(
           actionMode === 'cambio'
-            ? 'Cambio registrado. Queda en Historial de cambios.'
+            ? 'Cambio registrado (no pendiente). Revisa el buzón de la prenda en Historial de cambios.'
             : 'Venta actualizada.'
         );
       } else {
@@ -351,18 +411,20 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCamb
           <p className="module-kicker">Recepción</p>
           <h2>Ventas</h2>
           <p className="panel-sub">
-            Crear, filtrar, editar y registrar un <strong>Cambio</strong> de prenda. El control de
-            intercambios está en <strong>Historial de cambios</strong>. Fuente: {source || '—'}
+            Día a día: crear, filtrar, editar. Usa <strong>Cambio</strong> para iniciar un
+            intercambio (incluye talla original y de reemplazo). El buzón y control por prenda
+            están en <strong>Historial de cambios</strong>. Fuente: {source || '—'}
           </p>
         </div>
       </div>
 
-      <div className="sales-compose">
+      <div className={`sales-compose${actionMode === 'cambio' ? ' sales-compose-cambio' : ''}`}>
         <div className="sales-compose-head">
           <h3>{formTitle}</h3>
           <p className="muted sales-compose-hint">
-            Elige referencia + tarifa (Tienda / Mayorista −30% / Consignación −15%) — el precio se
-            llena solo y puedes ajustarlo a mano.
+            {actionMode === 'cambio'
+              ? 'Reemplaza la prenda en las líneas (referencia + talla de la original y del reemplazo). Al guardar queda registrado en el buzón de esa prenda — no es una revisión pendiente.'
+              : 'Elige referencia + tarifa (Tienda / Mayorista −30% / Consignación −15%) — el precio se llena solo y puedes ajustarlo a mano. Indica siempre la talla.'}
           </p>
         </div>
 
@@ -471,8 +533,15 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCamb
                   </tr>
                 </thead>
                 <tbody>
-                  {form.items.map((it, idx) => (
-                    <tr key={idx}>
+                  {form.items.map((it, idx) => {
+                    const refKey = String(it.referencia || '')
+                      .trim()
+                      .toUpperCase();
+                    const sizeOpts = tallasList(catalogByRef.get(refKey));
+                    const isFocus =
+                      focusReferencia && refKey === String(focusReferencia).toUpperCase();
+                    return (
+                    <tr key={idx} className={isFocus ? 'row-focus-garment' : ''}>
                       <td>
                         <input
                           type="text"
@@ -497,9 +566,24 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCamb
                           type="text"
                           value={it.talla}
                           onChange={(e) => updateItem(idx, { talla: e.target.value })}
-                          style={{ width: '5rem' }}
+                          style={{ width: '5.5rem' }}
                           placeholder="Talla"
+                          list={sizeOpts.length ? `tallas-line-${idx}` : undefined}
+                          required
+                          aria-label={`Talla línea ${idx + 1}`}
+                          title={
+                            sizeOpts.length
+                              ? `Tallas disponibles: ${sizeOpts.join(', ')}`
+                              : 'Indica la talla'
+                          }
                         />
+                        {sizeOpts.length ? (
+                          <datalist id={`tallas-line-${idx}`}>
+                            {sizeOpts.map((sz) => (
+                              <option key={sz} value={sz} />
+                            ))}
+                          </datalist>
+                        ) : null}
                       </td>
                       <td>
                         <input
@@ -541,7 +625,8 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCamb
                         </button>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -736,6 +821,7 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCamb
                 <th>Vendedor</th>
                 <th>Cliente</th>
                 <th>Prendas</th>
+                <th>Talla</th>
                 <th>Total</th>
                 <th>Estado</th>
                 <th>Acciones</th>
@@ -750,10 +836,21 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCamb
                   <td>
                     {(s.items || []).map((it, i) => (
                       <div key={i}>
-                        {it.referencia} · {it.talla} ×{it.cantidad}
+                        {it.referencia}
+                        {it.descripcion ? (
+                          <span className="muted"> · {it.descripcion}</span>
+                        ) : null}
+                        <span className="muted"> ×{it.cantidad}</span>
                         {it.tariff && it.tariff !== 'tienda' ? (
                           <span className="line-tariff-tag"> · {tariffLabel(it.tariff)}</span>
                         ) : null}
+                      </div>
+                    ))}
+                  </td>
+                  <td>
+                    {(s.items || []).map((it, i) => (
+                      <div key={i}>
+                        <strong>{formatTalla(it.talla)}</strong>
                       </div>
                     ))}
                   </td>
@@ -775,9 +872,36 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCamb
                     <button type="button" className="btn ghost" onClick={() => startEdit(s, 'edit')}>
                       Editar
                     </button>
-                    <button type="button" className="btn secondary" onClick={() => startEdit(s, 'cambio')}>
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      onClick={() => {
+                        startEdit(s, 'cambio');
+                        setFocusReferencia(
+                          s.items?.[0]?.referencia
+                            ? String(s.items[0].referencia).toUpperCase()
+                            : null
+                        );
+                        setMessage(
+                          'Modo Cambio: ajusta referencia y talla de la prenda de reemplazo, luego Guarda cambio.'
+                        );
+                      }}
+                      title="Inicia el cambio de prenda sobre esta venta"
+                    >
                       Cambio
                     </button>
+                    {onOpenGarmentMailbox && s.items?.[0]?.referencia ? (
+                      <button
+                        type="button"
+                        className="linkish"
+                        onClick={() =>
+                          onOpenGarmentMailbox(s.items[0].referencia, s.id)
+                        }
+                        title="Abrir buzón de la prenda en Historial"
+                      >
+                        Buzón prenda
+                      </button>
+                    ) : null}
                     {onOpenHistory ? (
                       <button
                         type="button"
@@ -793,7 +917,7 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCamb
               ))}
               {!sales.length ? (
                 <tr>
-                  <td colSpan={7} className="empty">
+                  <td colSpan={8} className="empty">
                     Sin ventas en este filtro
                   </td>
                 </tr>

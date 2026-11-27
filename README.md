@@ -105,7 +105,7 @@ DDL cannot be applied with the anon key alone; use the SQL Editor (or a real DB 
 | PUT | `/api/sales/:id` | Edit / cambio / estado + audit |
 | DELETE | `/api/sales/:id` | Remove one sale (manual duplicate cleanup) |
 | GET | `/api/sales/:id/history` | Per-sale change history |
-| GET | `/api/cambios` | Historial de cambios grouped by garment referencia |
+| GET | `/api/cambios` | Buzón por prenda: ventas asociadas + historial registrado (roles salió/entró) |
 | GET | `/api/sales/export/xlsx` | Excel export |
 
 ## Features
@@ -114,8 +114,8 @@ DDL cannot be applied with the anon key alone; use the SQL Editor (or a real DB 
 - Real-time search + category filter (Niña / Niño-Unisex / Accesorios)
 - Move garments between sections (persists `catalog_items.genero`)
 - Multi-tariff PDF catalog + personal Canva-page PDF (offline export path; Canva files deferred)
-- Sales sheet: day-to-day ventas with **Editar** / **Cambio**; refresh from DB; Excel import
-- **Historial de cambios** tab: mailbox of garment exchanges/edits by referencia
+- Sales sheet: day-to-day ventas with **Editar** / **Cambio** (starts exchange; talla required per line); refresh from DB; Excel import
+- **Historial de cambios** tab: per-garment mailbox — associated sales (pick sale → apply cambio) + registered history
 - Review possible duplicates (per-row keep/remove — no mass auto-delete in UI)
 - Sellers: create + edit name/active
 - PDF + XLSX sales export
@@ -133,7 +133,7 @@ npm run dedupe-sales              # review duplicate groups (Alejandra filter)
 npm run dedupe-sales:apply        # script-only mass delete of true twins (keeps oldest)
 ```
 
-UI (recepción): Ventas → **Refrescar lista** / **Actualizar ventas desde Excel** / **Revisar duplicados** (elige quitar por fila). Tab **Historial de cambios** = control de cambios de prenda.
+UI (recepción): Ventas → **Refrescar lista** / **Actualizar ventas desde Excel** / **Revisar duplicados** (elige quitar por fila) / **Cambio**. Tab **Historial de cambios** = buzón por prenda (ventas asociadas + historial).
 
 If Google Sheet sharing blocks automated refresh, re-export the VENTAS tab to `data/imports/ventas-sheet.csv` manually and re-run the probe.
 
