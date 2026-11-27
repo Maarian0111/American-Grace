@@ -1,29 +1,13 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
-import { formatCOP } from '../lib/format.js';
+import SaleSnapshotCards from './SaleSnapshotCards.jsx';
 
-function summarizeSale(data) {
-  if (!data) return '—';
-  const items = data.items || data.sale_items || [];
-  const lines = items
-    .map(
-      (it) =>
-        `${it.referencia || '?'} · ${it.talla || '—'} ×${it.cantidad || 1} @ ${formatCOP(
-          it.precio_unitario
-        )}`
-    )
-    .join('\n');
-  return [
-    `Fecha: ${data.fecha_venta || '—'}`,
-    `Vendedor: ${data.vendedor_nombre || '—'}`,
-    `Cliente: ${data.cliente || '—'}`,
-    `Estado: ${data.estado_pago || '—'}`,
-    `Total: ${formatCOP(data.total)}`,
-    data.notas ? `Notas: ${data.notas}` : null,
-    lines ? `Prendas:\n${lines}` : 'Sin prendas',
-  ]
-    .filter(Boolean)
-    .join('\n');
+function actionLabel(action) {
+  if (action === 'cambio') return 'Cambio';
+  if (action === 'edit') return 'Edición';
+  if (action === 'create') return 'Alta';
+  if (action === 'estado') return 'Estado';
+  return action || '—';
 }
 
 export default function SaleHistoryView({ saleId, onBack, backLabel = '← Volver a ventas' }) {
@@ -57,16 +41,17 @@ export default function SaleHistoryView({ saleId, onBack, backLabel = '← Volve
   }, [saleId]);
 
   return (
-    <section className="panel history-page">
+    <section className="panel history-page module-panel">
       <div className="history-page-head">
         <button type="button" className="btn ghost" onClick={onBack}>
           {backLabel}
         </button>
         <div>
-          <h2>Detalle de venta #{saleId}</h2>
+          <p className="module-kicker">Detalle</p>
+          <h2>Venta #{saleId}</h2>
           <p className="panel-sub">
-            Antes / después de cada cambio en esta venta. Los cambios de prenda también
-            aparecen en <strong>Historial de cambios</strong>, agrupados por referencia.
+            Antes / después de cada cambio. Los cambios de prenda también aparecen en{' '}
+            <strong>Historial de cambios</strong>, agrupados por referencia.
           </p>
         </div>
       </div>
@@ -76,8 +61,7 @@ export default function SaleHistoryView({ saleId, onBack, backLabel = '← Volve
 
       {sale ? (
         <div className="history-summary">
-          <h3>Estado actual</h3>
-          <pre>{summarizeSale(sale)}</pre>
+          <SaleSnapshotCards data={sale} title="Estado actual" tone="current" />
         </div>
       ) : null}
 
@@ -88,8 +72,8 @@ export default function SaleHistoryView({ saleId, onBack, backLabel = '← Volve
         {history.map((h) => (
           <article className="history-item history-item-full" key={h.id}>
             <header>
-              <strong>{h.action}</strong>
-              <span>
+              <strong className="action-badge">{actionLabel(h.action)}</strong>
+              <span className="history-meta">
                 {h.changed_by || '—'} ·{' '}
                 {h.created_at
                   ? new Date(h.created_at).toLocaleString('es-CO', {
@@ -98,24 +82,10 @@ export default function SaleHistoryView({ saleId, onBack, backLabel = '← Volve
                   : ''}
               </span>
             </header>
-            {h.context ? <p className="muted">{h.context}</p> : null}
+            {h.context ? <p className="muted history-context">{h.context}</p> : null}
             <div className="before-after">
-              <div>
-                <h4>Antes</h4>
-                <pre>{summarizeSale(h.before_data)}</pre>
-                <details>
-                  <summary>JSON completo</summary>
-                  <pre>{JSON.stringify(h.before_data, null, 2)}</pre>
-                </details>
-              </div>
-              <div>
-                <h4>Después</h4>
-                <pre>{summarizeSale(h.after_data)}</pre>
-                <details>
-                  <summary>JSON completo</summary>
-                  <pre>{JSON.stringify(h.after_data, null, 2)}</pre>
-                </details>
-              </div>
+              <SaleSnapshotCards data={h.before_data} title="Antes" tone="before" />
+              <SaleSnapshotCards data={h.after_data} title="Después" tone="after" />
             </div>
           </article>
         ))}

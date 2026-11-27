@@ -762,6 +762,254 @@ table.data tr:hover td {
   margin-bottom: 0.35rem;
 }
 
+/* Module layout — Ventas / Historial */
+.module-panel {
+  display: grid;
+  gap: 1.15rem;
+}
+
+.module-hero {
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.module-kicker {
+  margin: 0 0 0.2rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--blush-deep);
+  font-weight: 500;
+}
+
+.module-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.check-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}
+
+.sales-compose {
+  padding: 1rem 1.05rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(165deg, #fffcf8 0%, #f3ebe3 100%);
+}
+
+.sales-compose-head h3,
+.sales-list-head h3,
+.lines-block-head h4 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  margin: 0 0 0.35rem;
+}
+
+.sales-compose-hint,
+.field-hint {
+  margin: 0 0 0.85rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  line-height: 1.4;
+}
+
+.field-hint {
+  margin: 0.15rem 0 0;
+  font-size: 0.75rem;
+}
+
+.req-mark {
+  color: var(--blush-deep);
+}
+
+.lines-block-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.tariff-select {
+  min-width: 9.5rem;
+  max-width: 12rem;
+}
+
+.line-tariff-tag {
+  color: var(--ink-soft);
+  font-size: 0.82em;
+}
+
+.status-banner {
+  margin: 0;
+  padding: 0.65rem 0.85rem;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.92rem;
+}
+
+.sales-list-section {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.sales-list-head .toolbar-hint {
+  margin-top: 0.25rem;
+}
+
+.filters-row,
+.actions-row {
+  margin-bottom: 0;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+/* Snapshot cards — historial before/after */
+.snap-card {
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0.75rem 0.85rem;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.snap-card h4 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  margin: 0;
+  font-size: 1rem;
+}
+
+.snap-before {
+  border-left: 3px solid #c4b5a5;
+}
+
+.snap-after {
+  border-left: 3px solid var(--accent);
+}
+
+.snap-current {
+  border-left: 3px solid var(--blush-deep);
+}
+
+.snap-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.45rem 0.75rem;
+}
+
+.snap-field {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.snap-field-label {
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.snap-field-value {
+  font-size: 0.92rem;
+  color: var(--ink);
+  word-break: break-word;
+}
+
+.snap-items {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.snap-items-label {
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.snap-item {
+  padding: 0.5rem 0.65rem;
+  border-radius: 10px;
+  background: #f7f2eb;
+  border: 1px solid rgba(217, 207, 195, 0.65);
+}
+
+.snap-item-ref {
+  font-weight: 560;
+  font-size: 0.95rem;
+}
+
+.snap-item-desc {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  margin-top: 0.1rem;
+}
+
+.snap-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  margin-top: 0.35rem;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+
+.snap-tariff {
+  color: var(--accent);
+}
+
+.action-badge {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 8px;
+  background: #efe6dc;
+  font-size: 0.85rem;
+}
+
+.history-meta {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.history-context {
+  margin: 0.25rem 0 0;
+}
+
+.history-summary {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.pill-count.has-changes {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+}
+
+.before-after > div {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+}
+
 @media print {
   body {
     background: white;

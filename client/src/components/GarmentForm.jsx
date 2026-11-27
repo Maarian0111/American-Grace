@@ -149,7 +149,7 @@ export default function GarmentForm({ initial = null, onSubmit, onCancel, busy }
           <input
             type="number"
             min="0"
-            step="1000"
+            step="1"
             value={form.precio_tienda}
             onChange={(e) => setTienda(e.target.value)}
             required
@@ -161,7 +161,7 @@ export default function GarmentForm({ initial = null, onSubmit, onCancel, busy }
           <input
             type="number"
             min="0"
-            step="1000"
+            step="1"
             value={form.precio_mayorista}
             onChange={(e) =>
               setForm({
@@ -195,7 +195,7 @@ export default function GarmentForm({ initial = null, onSubmit, onCancel, busy }
           <input
             type="number"
             min="0"
-            step="1000"
+            step="1"
             value={form.precio_consignacion}
             onChange={(e) =>
               setForm({

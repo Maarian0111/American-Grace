@@ -159,7 +159,7 @@ function createSaleLocal(body, items, total) {
     fecha_venta: body.fecha_venta || new Date().toISOString().slice(0, 10),
     seller_id: body.seller_id || null,
     vendedor_nombre: body.vendedor_nombre || null,
-    cliente: body.cliente || null,
+    cliente: String(body.cliente || '').trim() || null,
     estado_pago: body.estado_pago || 'PENDIENTE',
     fecha_pago: body.fecha_pago || null,
     notas: body.notas || null,
@@ -731,6 +731,9 @@ app.post('/api/sales', async (req, res) => {
   const body = req.body || {};
   const items = Array.isArray(body.items) ? body.items : [];
   if (!items.length) return res.status(400).json({ error: 'items required' });
+  const cliente = String(body.cliente || '').trim();
+  if (!cliente) return res.status(400).json({ error: 'cliente required' });
+  body.cliente = cliente;
 
   const total = items.reduce(
     (sum, it) => sum + Number(it.precio_unitario || 0) * Number(it.cantidad || 1),
@@ -745,7 +748,7 @@ app.post('/api/sales', async (req, res) => {
           fecha_venta: body.fecha_venta || new Date().toISOString().slice(0, 10),
           seller_id: body.seller_id || null,
           vendedor_nombre: body.vendedor_nombre || null,
-          cliente: body.cliente || null,
+          cliente: body.cliente,
           estado_pago: body.estado_pago || 'PENDIENTE',
           fecha_pago: body.fecha_pago || null,
           notas: body.notas || null,
@@ -807,6 +810,17 @@ app.put('/api/sales/:id', async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body || {};
   const action = body.action || 'edit'; // edit | cambio | estado
+
+  // Full edits / cambios must keep a client name (estado-only patches skip this).
+  if (action !== 'estado' && Array.isArray(body.items)) {
+    const cliente = String(body.cliente || '').trim();
+    if (!cliente) return res.status(400).json({ error: 'cliente required' });
+    body.cliente = cliente;
+  } else if (body.cliente !== undefined && action !== 'estado') {
+    const cliente = String(body.cliente || '').trim();
+    if (!cliente) return res.status(400).json({ error: 'cliente required' });
+    body.cliente = cliente;
+  }
 
   try {
     if (supabase) {
