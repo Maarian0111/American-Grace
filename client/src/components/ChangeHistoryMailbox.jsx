@@ -1,23 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api.js';
-import { formatCOP } from '../lib/format.js';
-
-function summarizeItems(data) {
-  const items = data?.items || data?.sale_items || [];
-  if (!items.length) return 'Sin prendas';
-  return items
-    .map(
-      (it) =>
-        `${it.referencia || '?'} · ${it.talla || '—'} ×${it.cantidad || 1} @ ${formatCOP(
-          it.precio_unitario
-        )}`
-    )
-    .join('\n');
-}
+import SaleSnapshotCards from './SaleSnapshotCards.jsx';
 
 function actionLabel(action) {
   if (action === 'cambio') return 'Cambio';
   if (action === 'edit') return 'Edición';
+  if (action === 'create') return 'Alta';
+  if (action === 'estado') return 'Estado';
   return action || '—';
 }
 
@@ -60,21 +49,21 @@ export default function ChangeHistoryMailbox({ catalog, onOpenSaleHistory }) {
   const withChanges = garments.filter((g) => (g.changes || []).length > 0).length;
 
   return (
-    <section className="panel history-page">
-      <div className="history-page-head">
+    <section className="panel history-page module-panel">
+      <div className="module-hero">
         <div>
+          <p className="module-kicker">Control de prendas</p>
           <h2>Historial de cambios</h2>
           <p className="panel-sub">
-            Buzón de cambios e intercambios de prenda, organizado por referencia. Las ventas del día a
-            día viven en <strong>Ventas</strong>; aquí se controlan los cambios. Fuente:{' '}
-            {source || '—'}
+            Intercambios y ediciones por referencia. El día a día está en <strong>Ventas</strong>.
+            Fuente: {source || '—'}
             {catalog?.length ? ` · catálogo ${catalog.length} refs` : ''}
             {withChanges ? ` · ${withChanges} con movimientos` : ''}
           </p>
         </div>
       </div>
 
-      <div className="toolbar">
+      <div className="module-toolbar">
         <input
           type="search"
           value={filter}
@@ -83,7 +72,7 @@ export default function ChangeHistoryMailbox({ catalog, onOpenSaleHistory }) {
           aria-label="Buscar prenda"
           style={{ minWidth: '14rem' }}
         />
-        <label className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+        <label className="check-inline">
           <input
             type="checkbox"
             checked={onlyWithChanges}
@@ -116,7 +105,7 @@ export default function ChangeHistoryMailbox({ catalog, onOpenSaleHistory }) {
                 </h3>
                 {g.descripcion ? <p className="muted">{g.descripcion}</p> : null}
               </div>
-              <span className="pill-count">
+              <span className={`pill-count ${(g.changes || []).length ? 'has-changes' : ''}`}>
                 {(g.changes || []).length
                   ? `${g.changes.length} cambio(s)`
                   : 'Sin cambios'}
@@ -130,8 +119,8 @@ export default function ChangeHistoryMailbox({ catalog, onOpenSaleHistory }) {
                 {g.changes.map((h) => (
                   <li className="history-item history-item-full" key={`${g.referencia}-${h.id}`}>
                     <header>
-                      <strong>{actionLabel(h.action)}</strong>
-                      <span>
+                      <strong className="action-badge">{actionLabel(h.action)}</strong>
+                      <span className="history-meta">
                         Venta #{h.sale_id} · {h.changed_by || '—'} ·{' '}
                         {h.created_at
                           ? new Date(h.created_at).toLocaleString('es-CO', {
@@ -140,16 +129,10 @@ export default function ChangeHistoryMailbox({ catalog, onOpenSaleHistory }) {
                           : ''}
                       </span>
                     </header>
-                    {h.context ? <p className="muted">{h.context}</p> : null}
+                    {h.context ? <p className="muted history-context">{h.context}</p> : null}
                     <div className="before-after">
-                      <div>
-                        <h4>Antes</h4>
-                        <pre>{summarizeItems(h.before_data)}</pre>
-                      </div>
-                      <div>
-                        <h4>Después</h4>
-                        <pre>{summarizeItems(h.after_data)}</pre>
-                      </div>
+                      <SaleSnapshotCards data={h.before_data} title="Antes" tone="before" />
+                      <SaleSnapshotCards data={h.after_data} title="Después" tone="after" />
                     </div>
                     {onOpenSaleHistory ? (
                       <button

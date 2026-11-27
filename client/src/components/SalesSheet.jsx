@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { api } from '../lib/api.js';
-import { formatCOP, priceForTariff } from '../lib/format.js';
+import { formatCOP, priceForTariff, TARIFF_OPTIONS, tariffLabel } from '../lib/format.js';
 
 const ESTADOS = [
   'PENDIENTE',
@@ -13,6 +13,18 @@ const ESTADOS = [
   'CANCELADO',
 ];
 
+function emptyLine(tariff = 'tienda') {
+  return {
+    referencia: '',
+    descripcion: '',
+    talla: '',
+    cantidad: 1,
+    precio_unitario: 0,
+    catalog_item_id: null,
+    tariff,
+  };
+}
+
 const emptyForm = () => ({
   fecha_venta: new Date().toISOString().slice(0, 10),
   seller_id: '',
@@ -21,8 +33,8 @@ const emptyForm = () => ({
   estado_pago: 'PENDIENTE',
   fecha_pago: '',
   notas: '',
-  tariff: 'tienda',
-  items: [{ referencia: '', descripcion: '', talla: '', cantidad: 1, precio_unitario: 0, catalog_item_id: null }],
+  defaultTariff: 'tienda',
+  items: [emptyLine('tienda')],
 });
 
 export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCambios }) {
@@ -87,24 +99,41 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCamb
     });
   }
 
-  function onRefBlur(idx, value) {
-    const hit = catalogByRef.get(String(value).trim().toUpperCase());
+  /** Fill description + price from catalog for the line's tariff (price still overridable). */
+  function applyCatalogToLine(idx, referencia, tariff) {
+    const hit = catalogByRef.get(String(referencia || '').trim().toUpperCase());
     if (!hit) return;
     updateItem(idx, {
       referencia: hit.referencia,
       descripcion: hit.descripcion || hit.referencia_ag,
       catalog_item_id: hit.id || null,
-      precio_unitario: priceForTariff(hit, form.tariff),
+      tariff: tariff || 'tienda',
+      precio_unitario: priceForTariff(hit, tariff || 'tienda'),
     });
+  }
+
+  function onRefBlur(idx, value) {
+    const line = form.items[idx];
+    applyCatalogToLine(idx, value, line?.tariff || form.defaultTariff);
+  }
+
+  function onLineTariffChange(idx, tariff) {
+    const line = form.items[idx];
+    const hit = catalogByRef.get(String(line.referencia || '').trim().toUpperCase());
+    if (hit) {
+      updateItem(idx, {
+        tariff,
+        precio_unitario: priceForTariff(hit, tariff),
+      });
+    } else {
+      updateItem(idx, { tariff });
+    }
   }
 
   function addLine() {
     setForm((f) => ({
       ...f,
-      items: [
-        ...f.items,
-        { referencia: '', descripcion: '', talla: '', cantidad: 1, precio_unitario: 0, catalog_item_id: null },
-      ],
+      items: [...f.items, emptyLine(f.defaultTariff)],
     }));
   }
 
@@ -126,7 +155,7 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCamb
       estado_pago: sale.estado_pago || 'PENDIENTE',
       fecha_pago: sale.fecha_pago || '',
       notas: sale.notas || '',
-      tariff: 'tienda',
+      defaultTariff: 'tienda',
       items: (sale.items || []).map((it) => ({
         referencia: it.referencia,
         descripcion: it.descripcion,
@@ -149,8 +178,14 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCamb
   async function submit(e) {
     e.preventDefault();
     setMessage('');
+    const cliente = String(form.cliente || '').trim();
+    if (!cliente) {
+      setMessage('El nombre del cliente es obligatorio.');
+      return;
+    }
     const payload = {
       ...form,
+      cliente,
       seller_id: form.seller_id ? Number(form.seller_id) : null,
       fecha_pago: form.fecha_pago || null,
       items: form.items
@@ -159,7 +194,7 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCamb
           ...it,
           cantidad: Number(it.cantidad || 1),
           precio_unitario: Number(it.precio_unitario || 0),
-          tariff: it.tariff || form.tariff,
+          tariff: it.tariff || form.defaultTariff || 'tienda',
         })),
       changed_by: form.vendedor_nombre || 'sistema',
       action: actionMode === 'cambio' ? 'cambio' : actionMode === 'edit' ? 'edit' : 'create',
@@ -230,7 +265,7 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCamb
       setDupeGroups(data.groups || []);
       setMessage(
         data.duplicateGroups
-          ? `Posibles duplicados: ${data.duplicateGroups} grupo(s). Revisa cada fila — misma prenda puede ser de clientes distintos.`
+          ? `Posibles duplicados: ${data.duplicateGroups} grupo(s). Misma fecha/vendedor/cliente/prendas — revisa cada fila.`
           : 'No se encontraron posibles duplicados.'
       );
     } catch (err) {
@@ -281,6 +316,7 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCamb
         body.push([
           s.fecha_venta,
           s.vendedor_nombre || '',
+          s.cliente || '',
           it.referencia || '',
           it.descripcion || '',
           it.talla || '',
@@ -293,7 +329,7 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCamb
 
     autoTable(doc, {
       startY: 72,
-      head: [['Fecha', 'Vendedor', 'Ref.', 'Descripción', 'Talla', 'Cant', 'Estado', 'Precio']],
+      head: [['Fecha', 'Vendedor', 'Cliente', 'Ref.', 'Descripción', 'Talla', 'Cant', 'Estado', 'Precio']],
       body,
       styles: { fontSize: 8 },
       headStyles: { fillColor: [42, 36, 32] },
@@ -301,403 +337,470 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory, onOpenCamb
     doc.save('ventas-american-grace.pdf');
   }
 
+  const formTitle =
+    actionMode === 'cambio'
+      ? 'Registrar cambio de prenda'
+      : editingId
+        ? 'Editar venta'
+        : 'Nueva venta';
+
   return (
-    <section className="panel">
-      <h2>Hoja de ventas</h2>
-      <p className="panel-sub">
-        Ventas del día a día: crear, filtrar, editar y registrar un <strong>Cambio</strong> de prenda.
-        El control de cambios está en <strong>Historial de cambios</strong>. Fuente: {source || '—'}
-      </p>
+    <section className="panel module-panel">
+      <div className="module-hero">
+        <div>
+          <p className="module-kicker">Recepción</p>
+          <h2>Ventas</h2>
+          <p className="panel-sub">
+            Crear, filtrar, editar y registrar un <strong>Cambio</strong> de prenda. El control de
+            intercambios está en <strong>Historial de cambios</strong>. Fuente: {source || '—'}
+          </p>
+        </div>
+      </div>
 
-      <form onSubmit={submit}>
-        <div className="form-grid">
-          <div className="field">
-            <label>Fecha venta</label>
-            <input
-              type="date"
-              value={form.fecha_venta}
-              onChange={(e) => setForm({ ...form, fecha_venta: e.target.value })}
-              required
-            />
-          </div>
-          <div className="field">
-            <label>Vendedor</label>
-            <select
-              value={form.seller_id}
-              onChange={(e) => onSellerChange(e.target.value)}
-              required
-            >
-              <option value="">Seleccionar…</option>
-              {sellers.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>Cliente</label>
-            <input
-              type="text"
-              value={form.cliente}
-              onChange={(e) => setForm({ ...form, cliente: e.target.value })}
-              placeholder="Opcional"
-            />
-          </div>
-          <div className="field">
-            <label>Estado pago</label>
-            <select
-              value={form.estado_pago}
-              onChange={(e) => setForm({ ...form, estado_pago: e.target.value })}
-            >
-              {ESTADOS.map((e) => (
-                <option key={e} value={e}>
-                  {e}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>Fecha pago</label>
-            <input
-              type="date"
-              value={form.fecha_pago}
-              onChange={(e) => setForm({ ...form, fecha_pago: e.target.value })}
-            />
-          </div>
-          <div className="field">
-            <label>Tarifa nuevas líneas</label>
-            <select
-              value={form.tariff}
-              onChange={(e) => setForm({ ...form, tariff: e.target.value })}
-            >
-              <option value="tienda">Tienda</option>
-              <option value="mayorista">Mayorista</option>
-              <option value="consignacion">Consignación</option>
-            </select>
-          </div>
+      <div className="sales-compose">
+        <div className="sales-compose-head">
+          <h3>{formTitle}</h3>
+          <p className="muted sales-compose-hint">
+            Elige referencia + tarifa (Tienda / Mayorista −30% / Consignación −15%) — el precio se
+            llena solo y puedes ajustarlo a mano.
+          </p>
         </div>
 
-        <div className="field" style={{ marginBottom: '0.85rem' }}>
-          <label>Notas</label>
-          <textarea
-            value={form.notas}
-            onChange={(e) => setForm({ ...form, notas: e.target.value })}
-            placeholder="Observaciones, entrega, cambio…"
-          />
+        <form onSubmit={submit}>
+          <div className="form-grid">
+            <div className="field">
+              <label>Fecha venta</label>
+              <input
+                type="date"
+                value={form.fecha_venta}
+                onChange={(e) => setForm({ ...form, fecha_venta: e.target.value })}
+                required
+              />
+            </div>
+            <div className="field">
+              <label>Vendedor</label>
+              <select
+                value={form.seller_id}
+                onChange={(e) => onSellerChange(e.target.value)}
+                required
+              >
+                <option value="">Seleccionar…</option>
+                {sellers.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>
+                Cliente <span className="req-mark">*</span>
+              </label>
+              <input
+                type="text"
+                value={form.cliente}
+                onChange={(e) => setForm({ ...form, cliente: e.target.value })}
+                placeholder="Nombre del cliente"
+                required
+                autoComplete="name"
+              />
+            </div>
+            <div className="field">
+              <label>Estado pago</label>
+              <select
+                value={form.estado_pago}
+                onChange={(e) => setForm({ ...form, estado_pago: e.target.value })}
+              >
+                {ESTADOS.map((e) => (
+                  <option key={e} value={e}>
+                    {e}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>Fecha pago</label>
+              <input
+                type="date"
+                value={form.fecha_pago}
+                onChange={(e) => setForm({ ...form, fecha_pago: e.target.value })}
+              />
+            </div>
+            <div className="field">
+              <label>Tarifa por defecto</label>
+              <select
+                value={form.defaultTariff}
+                onChange={(e) => setForm({ ...form, defaultTariff: e.target.value })}
+                title="Se aplica a líneas nuevas; cada línea puede cambiar su tarifa"
+              >
+                {TARIFF_OPTIONS.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+              <span className="field-hint">Solo para líneas nuevas</span>
+            </div>
+          </div>
+
+          <div className="field" style={{ marginBottom: '0.85rem' }}>
+            <label>Notas</label>
+            <textarea
+              value={form.notas}
+              onChange={(e) => setForm({ ...form, notas: e.target.value })}
+              placeholder="Observaciones, entrega, cambio…"
+            />
+          </div>
+
+          <div className="lines-block">
+            <div className="lines-block-head">
+              <h4>Líneas de prenda</h4>
+              <span className="muted">Referencia + tarifa → precio automático</span>
+            </div>
+            <div className="table-wrap" style={{ marginBottom: '0.85rem' }}>
+              <table className="data lines-table">
+                <thead>
+                  <tr>
+                    <th>Referencia</th>
+                    <th>Descripción</th>
+                    <th>Talla</th>
+                    <th>Cant</th>
+                    <th>Tarifa</th>
+                    <th>Precio</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {form.items.map((it, idx) => (
+                    <tr key={idx}>
+                      <td>
+                        <input
+                          type="text"
+                          value={it.referencia}
+                          onChange={(e) => updateItem(idx, { referencia: e.target.value })}
+                          onBlur={(e) => onRefBlur(idx, e.target.value)}
+                          list="catalog-refs"
+                          required
+                          placeholder="Ref."
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="text"
+                          value={it.descripcion}
+                          onChange={(e) => updateItem(idx, { descripcion: e.target.value })}
+                          placeholder="Descripción"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="text"
+                          value={it.talla}
+                          onChange={(e) => updateItem(idx, { talla: e.target.value })}
+                          style={{ width: '5rem' }}
+                          placeholder="Talla"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min="1"
+                          value={it.cantidad}
+                          onChange={(e) => updateItem(idx, { cantidad: e.target.value })}
+                          style={{ width: '4rem' }}
+                        />
+                      </td>
+                      <td>
+                        <select
+                          value={it.tariff || form.defaultTariff}
+                          onChange={(e) => onLineTariffChange(idx, e.target.value)}
+                          aria-label={`Tarifa línea ${idx + 1}`}
+                          className="tariff-select"
+                        >
+                          {TARIFF_OPTIONS.map((t) => (
+                            <option key={t.value} value={t.value}>
+                              {t.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={it.precio_unitario}
+                          onChange={(e) => updateItem(idx, { precio_unitario: e.target.value })}
+                          style={{ width: '7rem' }}
+                          title="Puedes ajustar el precio a mano"
+                        />
+                      </td>
+                      <td>
+                        <button type="button" className="btn ghost" onClick={() => removeLine(idx)}>
+                          Quitar
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <datalist id="catalog-refs">
+            {catalog.map((c) => (
+              <option key={c.referencia} value={c.referencia}>
+                {c.referencia_ag}
+              </option>
+            ))}
+          </datalist>
+
+          <div className="toolbar">
+            <button type="button" className="btn secondary" onClick={addLine}>
+              + Prenda
+            </button>
+            <button type="submit" className="btn">
+              {actionMode === 'cambio'
+                ? 'Guardar cambio'
+                : editingId
+                  ? 'Guardar edición'
+                  : 'Registrar venta'}
+            </button>
+            {editingId ? (
+              <button type="button" className="btn ghost" onClick={resetForm}>
+                Cancelar
+              </button>
+            ) : null}
+          </div>
+        </form>
+      </div>
+
+      {message ? <p className="status-banner">{message}</p> : null}
+
+      <div className="sales-list-section">
+        <div className="sales-list-head">
+          <h3>Lista de ventas</h3>
+          <p className="toolbar-hint">
+            <strong>Refrescar lista</strong> recarga desde la base (no Excel).{' '}
+            <strong>Actualizar desde Excel</strong> trae líneas nuevas.{' '}
+            <strong>Revisar duplicados</strong> agrupa por fecha + vendedor + cliente + prendas —
+            tú eliges cuál quitar.
+          </p>
         </div>
 
-        <div className="table-wrap" style={{ marginBottom: '0.85rem' }}>
-          <table className="data">
-            <thead>
-              <tr>
-                <th>Referencia</th>
-                <th>Descripción</th>
-                <th>Talla</th>
-                <th>Cant</th>
-                <th>Precio</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {form.items.map((it, idx) => (
-                <tr key={idx}>
-                  <td>
-                    <input
-                      type="text"
-                      value={it.referencia}
-                      onChange={(e) => updateItem(idx, { referencia: e.target.value })}
-                      onBlur={(e) => onRefBlur(idx, e.target.value)}
-                      list="catalog-refs"
-                      required
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="text"
-                      value={it.descripcion}
-                      onChange={(e) => updateItem(idx, { descripcion: e.target.value })}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="text"
-                      value={it.talla}
-                      onChange={(e) => updateItem(idx, { talla: e.target.value })}
-                      style={{ width: '5rem' }}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      min="1"
-                      value={it.cantidad}
-                      onChange={(e) => updateItem(idx, { cantidad: e.target.value })}
-                      style={{ width: '4rem' }}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      min="0"
-                      step="1000"
-                      value={it.precio_unitario}
-                      onChange={(e) => updateItem(idx, { precio_unitario: e.target.value })}
-                      style={{ width: '7rem' }}
-                    />
-                  </td>
-                  <td>
-                    <button type="button" className="btn ghost" onClick={() => removeLine(idx)}>
-                      Quitar
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <datalist id="catalog-refs">
-          {catalog.map((c) => (
-            <option key={c.referencia} value={c.referencia}>
-              {c.referencia_ag}
-            </option>
-          ))}
-        </datalist>
-
-        <div className="toolbar">
-          <button type="button" className="btn secondary" onClick={addLine}>
-            + Prenda
+        <div className="module-toolbar filters-row">
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="Desde" />
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="Hasta" />
+          <select value={sellerId} onChange={(e) => setSellerId(e.target.value)}>
+            <option value="">Todos los vendedores</option>
+            {sellers.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+          <select value={estado} onChange={(e) => setEstado(e.target.value)}>
+            <option value="">Todos los estados</option>
+            {ESTADOS.map((e) => (
+              <option key={e} value={e}>
+                {e}
+              </option>
+            ))}
+          </select>
+          <button type="button" className="btn secondary" onClick={load} disabled={loading}>
+            {loading ? 'Cargando…' : 'Filtrar'}
           </button>
-          <button type="submit" className="btn">
-            {actionMode === 'cambio'
-              ? 'Guardar cambio'
-              : editingId
-                ? 'Guardar edición'
-                : 'Registrar venta'}
+          <button type="button" className="btn" onClick={exportPdf}>
+            PDF
           </button>
-          {editingId ? (
-            <button type="button" className="btn ghost" onClick={resetForm}>
-              Cancelar
+          <a className="btn ghost" href={api.exportSalesXlsxUrl({ from, to, seller_id: sellerId })}>
+            XLSX
+          </a>
+        </div>
+
+        <div className="module-toolbar actions-row">
+          <button
+            type="button"
+            className="btn secondary"
+            onClick={load}
+            disabled={loading}
+            title="Recarga la lista de ventas desde la base de datos"
+          >
+            {loading ? 'Cargando…' : 'Refrescar lista'}
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={runImport}
+            title="Trae ventas nuevas del Sheet/Excel a la app (no borra las ya cargadas)"
+          >
+            Actualizar ventas desde Excel
+          </button>
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={reviewDuplicates}
+            disabled={dupeLoading}
+            title="Muestra posibles ventas duplicadas para que tú elijas cuáles quitar"
+          >
+            {dupeLoading ? 'Revisando…' : 'Revisar duplicados'}
+          </button>
+          {onOpenCambios ? (
+            <button type="button" className="btn ghost" onClick={onOpenCambios}>
+              Ir a Historial de cambios
             </button>
           ) : null}
         </div>
-      </form>
 
-      {message ? <p className="muted">{message}</p> : null}
-
-      <hr style={{ border: 0, borderTop: '1px solid var(--line)', margin: '1.25rem 0' }} />
-
-      <div className="toolbar">
-        <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="Desde" />
-        <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="Hasta" />
-        <select value={sellerId} onChange={(e) => setSellerId(e.target.value)}>
-          <option value="">Todos los vendedores</option>
-          {sellers.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
-        <select value={estado} onChange={(e) => setEstado(e.target.value)}>
-          <option value="">Todos los estados</option>
-          {ESTADOS.map((e) => (
-            <option key={e} value={e}>
-              {e}
-            </option>
-          ))}
-        </select>
-        <button type="button" className="btn secondary" onClick={load} disabled={loading}>
-          {loading ? 'Cargando…' : 'Filtrar'}
-        </button>
-        <button type="button" className="btn" onClick={exportPdf}>
-          PDF
-        </button>
-        <a className="btn ghost" href={api.exportSalesXlsxUrl({ from, to, seller_id: sellerId })}>
-          XLSX
-        </a>
-      </div>
-
-      <p className="toolbar-hint">
-        <strong>Refrescar lista</strong> vuelve a cargar las ventas desde la base de datos (no usa
-        Excel). <strong>Actualizar ventas desde Excel</strong> trae líneas nuevas del Sheet.
-        <strong> Revisar duplicados</strong> solo muestra posibles gemelas — tú decides cuál quitar.
-      </p>
-
-      <div className="toolbar">
-        <button
-          type="button"
-          className="btn secondary"
-          onClick={load}
-          disabled={loading}
-          title="Recarga la lista de ventas desde la base de datos"
-        >
-          {loading ? 'Cargando…' : 'Refrescar lista'}
-        </button>
-        <button
-          type="button"
-          className="btn"
-          onClick={runImport}
-          title="Trae ventas nuevas del Sheet/Excel a la app (no borra las ya cargadas)"
-        >
-          Actualizar ventas desde Excel
-        </button>
-        <button
-          type="button"
-          className="btn ghost"
-          onClick={reviewDuplicates}
-          disabled={dupeLoading}
-          title="Muestra posibles ventas duplicadas para que tú elijas cuáles quitar"
-        >
-          {dupeLoading ? 'Revisando…' : 'Revisar duplicados'}
-        </button>
-        {onOpenCambios ? (
-          <button type="button" className="btn ghost" onClick={onOpenCambios}>
-            Ir a Historial de cambios
-          </button>
-        ) : null}
-      </div>
-
-      {dupeGroups ? (
-        <div className="dupe-review">
-          <div className="dupe-review-head">
-            <h3>Revisión de duplicados</h3>
-            <button type="button" className="btn ghost" onClick={dismissDupeReview}>
-              Cerrar revisión
-            </button>
-          </div>
-          <p className="muted">
-            Misma prenda, precio o cantidad puede ser de clientes distintos — no se borra nada
-            automáticamente. Quita solo la fila que sobra; luego pulsa <strong>Refrescar lista</strong>.
-          </p>
-          {!dupeGroups.length ? (
-            <p className="empty">Sin grupos duplicados para revisar.</p>
-          ) : (
-            dupeGroups.map((g, gi) => (
-              <div className="dupe-group" key={g.fingerprint || gi}>
-                <h4>
-                  Grupo {gi + 1} · {(g.sales || []).length} ventas parecidas
-                </h4>
-                <div className="table-wrap">
-                  <table className="data">
-                    <thead>
-                      <tr>
-                        <th>Id</th>
-                        <th>Fecha</th>
-                        <th>Vendedor</th>
-                        <th>Cliente</th>
-                        <th>Prendas</th>
-                        <th>Total</th>
-                        <th>Acción</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(g.sales || []).map((s) => (
-                        <tr key={s.id}>
-                          <td>#{s.id}</td>
-                          <td>{s.fecha_venta}</td>
-                          <td>{s.vendedor_nombre || '—'}</td>
-                          <td>{s.cliente || '—'}</td>
-                          <td>
-                            {(s.items || []).length
-                              ? (s.items || []).map((it, i) => (
-                                  <div key={i}>
-                                    {it.referencia} · {it.talla || '—'} ×{it.cantidad}{' '}
-                                    {formatCOP(it.precio_unitario)}
-                                  </div>
-                                ))
-                              : `${s.itemCount || 0} ítem(s)`}
-                          </td>
-                          <td>{formatCOP(s.total)}</td>
-                          <td>
-                            <button
-                              type="button"
-                              className="btn ghost"
-                              disabled={removingId === s.id}
-                              onClick={() => removeDuplicateSale(s.id)}
-                            >
-                              {removingId === s.id ? 'Quitando…' : 'Quitar'}
-                            </button>
-                          </td>
+        {dupeGroups ? (
+          <div className="dupe-review">
+            <div className="dupe-review-head">
+              <h3>Revisión de duplicados</h3>
+              <button type="button" className="btn ghost" onClick={dismissDupeReview}>
+                Cerrar revisión
+              </button>
+            </div>
+            <p className="muted">
+              Agrupa ventas con misma fecha, vendedor, <strong>cliente</strong> y prendas/precio.
+              Clientes distintos no aparecen juntos. Quita solo la fila que sobra; luego{' '}
+              <strong>Refrescar lista</strong>.
+            </p>
+            {!dupeGroups.length ? (
+              <p className="empty">Sin grupos duplicados para revisar.</p>
+            ) : (
+              dupeGroups.map((g, gi) => (
+                <div className="dupe-group" key={g.fingerprint || gi}>
+                  <h4>
+                    Grupo {gi + 1} · {(g.sales || []).length} ventas parecidas
+                    {g.sales?.[0]?.cliente ? ` · ${g.sales[0].cliente}` : ''}
+                  </h4>
+                  <div className="table-wrap">
+                    <table className="data">
+                      <thead>
+                        <tr>
+                          <th>Id</th>
+                          <th>Fecha</th>
+                          <th>Vendedor</th>
+                          <th>Cliente</th>
+                          <th>Prendas</th>
+                          <th>Total</th>
+                          <th>Acción</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {(g.sales || []).map((s) => (
+                          <tr key={s.id}>
+                            <td>#{s.id}</td>
+                            <td>{s.fecha_venta}</td>
+                            <td>{s.vendedor_nombre || '—'}</td>
+                            <td>
+                              <strong>{s.cliente || '—'}</strong>
+                            </td>
+                            <td>
+                              {(s.items || []).length
+                                ? (s.items || []).map((it, i) => (
+                                    <div key={i}>
+                                      {it.referencia} · {it.talla || '—'} ×{it.cantidad}{' '}
+                                      {formatCOP(it.precio_unitario)}
+                                      {it.tariff ? ` · ${tariffLabel(it.tariff)}` : ''}
+                                    </div>
+                                  ))
+                                : `${s.itemCount || 0} ítem(s)`}
+                            </td>
+                            <td>{formatCOP(s.total)}</td>
+                            <td>
+                              <button
+                                type="button"
+                                className="btn ghost"
+                                disabled={removingId === s.id}
+                                onClick={() => removeDuplicateSale(s.id)}
+                              >
+                                {removingId === s.id ? 'Quitando…' : 'Quitar'}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
-            ))
-          )}
-        </div>
-      ) : null}
+              ))
+            )}
+          </div>
+        ) : null}
 
-      <div className="table-wrap">
-        <table className="data">
-          <thead>
-            <tr>
-              <th>Fecha</th>
-              <th>Vendedor</th>
-              <th>Cliente</th>
-              <th>Prendas</th>
-              <th>Total</th>
-              <th>Estado</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sales.map((s) => (
-              <tr key={s.id}>
-                <td>{s.fecha_venta}</td>
-                <td>{s.vendedor_nombre}</td>
-                <td>{s.cliente || '—'}</td>
-                <td>
-                  {(s.items || []).map((it, i) => (
-                    <div key={i}>
-                      {it.referencia} · {it.talla} ×{it.cantidad}
-                    </div>
-                  ))}
-                </td>
-                <td>{formatCOP(s.total)}</td>
-                <td>
-                  <select
-                    value={s.estado_pago}
-                    onChange={(e) => changeEstado(s, e.target.value)}
-                    title="Cambio manual de estado (extensión Bancolombia pendiente)"
-                  >
-                    {ESTADOS.map((e) => (
-                      <option key={e} value={e}>
-                        {e}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
-                  <button type="button" className="btn ghost" onClick={() => startEdit(s, 'edit')}>
-                    Editar
-                  </button>
-                  <button type="button" className="btn secondary" onClick={() => startEdit(s, 'cambio')}>
-                    Cambio
-                  </button>
-                  {onOpenHistory ? (
-                    <button
-                      type="button"
-                      className="linkish"
-                      onClick={() => onOpenHistory(s.id)}
-                      title="Detalle de esta venta"
-                    >
-                      Ver detalle
-                    </button>
-                  ) : null}
-                </td>
-              </tr>
-            ))}
-            {!sales.length ? (
+        <div className="table-wrap">
+          <table className="data">
+            <thead>
               <tr>
-                <td colSpan={7} className="empty">
-                  Sin ventas en este filtro
-                </td>
+                <th>Fecha</th>
+                <th>Vendedor</th>
+                <th>Cliente</th>
+                <th>Prendas</th>
+                <th>Total</th>
+                <th>Estado</th>
+                <th>Acciones</th>
               </tr>
-            ) : null}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {sales.map((s) => (
+                <tr key={s.id}>
+                  <td>{s.fecha_venta}</td>
+                  <td>{s.vendedor_nombre}</td>
+                  <td>{s.cliente || '—'}</td>
+                  <td>
+                    {(s.items || []).map((it, i) => (
+                      <div key={i}>
+                        {it.referencia} · {it.talla} ×{it.cantidad}
+                        {it.tariff && it.tariff !== 'tienda' ? (
+                          <span className="line-tariff-tag"> · {tariffLabel(it.tariff)}</span>
+                        ) : null}
+                      </div>
+                    ))}
+                  </td>
+                  <td>{formatCOP(s.total)}</td>
+                  <td>
+                    <select
+                      value={s.estado_pago}
+                      onChange={(e) => changeEstado(s, e.target.value)}
+                      title="Cambio manual de estado (extensión Bancolombia pendiente)"
+                    >
+                      {ESTADOS.map((e) => (
+                        <option key={e} value={e}>
+                          {e}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="row-actions">
+                    <button type="button" className="btn ghost" onClick={() => startEdit(s, 'edit')}>
+                      Editar
+                    </button>
+                    <button type="button" className="btn secondary" onClick={() => startEdit(s, 'cambio')}>
+                      Cambio
+                    </button>
+                    {onOpenHistory ? (
+                      <button
+                        type="button"
+                        className="linkish"
+                        onClick={() => onOpenHistory(s.id)}
+                        title="Detalle de esta venta"
+                      >
+                        Ver detalle
+                      </button>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+              {!sales.length ? (
+                <tr>
+                  <td colSpan={7} className="empty">
+                    Sin ventas en este filtro
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
       </div>
     </section>
   );
