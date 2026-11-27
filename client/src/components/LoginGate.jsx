@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../lib/api.js';
 
-export default function LoginGate({ userRequired, softLock, onSuccess }) {
+export default function LoginGate({ userRequired, softLock, setupRequired, onSuccess }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -9,6 +9,7 @@ export default function LoginGate({ userRequired, softLock, onSuccess }) {
 
   async function submit(e) {
     e.preventDefault();
+    if (setupRequired) return;
     setBusy(true);
     setError('');
     try {
@@ -22,6 +23,38 @@ export default function LoginGate({ userRequired, softLock, onSuccess }) {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (setupRequired) {
+    return (
+      <div className="login-shell">
+        <div className="login-card">
+          <p className="login-brand">American Grace</p>
+          <h1>Falta configurar el acceso</h1>
+          <p className="muted">
+            En Render no hay <strong>APP_PASSWORD</strong>. Sin esa variable el inicio de sesión no
+            puede abrirse de forma segura.
+          </p>
+          <ol className="setup-steps">
+            <li>Abre el servicio en el dashboard de Render.</li>
+            <li>
+              <strong>Environment</strong> → <strong>Add Environment Variable</strong>.
+            </li>
+            <li>
+              Name: <code>APP_PASSWORD</code> · Value: una clave fuerte (no la compartas en chat).
+            </li>
+            <li>
+              Opcional: <code>APP_USER</code> y <code>SESSION_SECRET</code>.
+            </li>
+            <li>
+              <strong>Save</strong> y espera el redeploy (o Manual Deploy).
+            </li>
+            <li>Vuelve a esta página e inicia sesión con esa clave.</li>
+          </ol>
+          {error ? <p className="login-error">{error}</p> : null}
+        </div>
+      </div>
+    );
   }
 
   return (

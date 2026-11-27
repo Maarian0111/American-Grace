@@ -201,13 +201,17 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory }) {
   }
 
   async function runImport(dryRun) {
-    setMessage(dryRun ? 'Simulando importación…' : 'Importando ventas (sin borrar las existentes)…');
+    setMessage(
+      dryRun
+        ? 'Probando qué ventas nuevas traería el Excel…'
+        : 'Actualizando ventas desde Excel (sin borrar las existentes)…'
+    );
     try {
       const data = await api.importSales(dryRun);
       if (dryRun) {
         setMessage(
-          `Dry-run: ${data.wouldImportLines}/${data.sourceRows} líneas nuevas → ` +
-            `${data.wouldCreateSales} ventas; omitidas existentes: ${data.skippedExisting}. ` +
+          `Prueba: ${data.wouldImportLines}/${data.sourceRows} líneas nuevas → ` +
+            `${data.wouldCreateSales} ventas; ya existentes (se omiten): ${data.skippedExisting}. ` +
             `Gaps: ${JSON.stringify(data.gapSummary || {})}` +
             (data.uniqueRefsMissing?.length
               ? `; refs fuera de catálogo: ${data.uniqueRefsMissing.join(', ')}`
@@ -215,37 +219,37 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory }) {
         );
       } else {
         setMessage(
-          `Importado: ${data.importedLines} líneas en ${data.importedSales} ventas ` +
+          `Ventas actualizadas: ${data.importedLines} líneas en ${data.importedSales} ventas ` +
             `(omitidas: ${data.skippedExisting}; fuente ${data.source}).`
         );
         await load();
       }
     } catch (err) {
-      setMessage(`Import error: ${err.message}`);
+      setMessage(`Error al actualizar ventas: ${err.message}`);
     }
   }
 
   async function runDedupe(dryRun) {
     setMessage(
       dryRun
-        ? 'Buscando ventas duplicadas (Alejandra / todas)…'
-        : 'Eliminando duplicados verdaderos (se conserva la más antigua)…'
+        ? 'Revisando ventas duplicadas…'
+        : 'Quitando ventas duplicadas (se conserva la más antigua)…'
     );
     try {
       const data = await api.dedupeSales({ dryRun, vendedor: 'Alejandra' });
       if (dryRun) {
         setMessage(
-          `Dedupe dry-run: ${data.duplicateGroups} grupo(s), ` +
-            `borraría ${data.wouldDelete} venta(s), conserva ids ${(data.wouldKeep || []).join(', ') || '—'}.`
+          `Revisión de duplicados: ${data.duplicateGroups} grupo(s), ` +
+            `quitaría ${data.wouldDelete} venta(s), conserva ids ${(data.wouldKeep || []).join(', ') || '—'}.`
         );
       } else {
         setMessage(
-          `Dedupe aplicado: eliminadas ${data.deleted} venta(s) en ${data.duplicateGroups} grupo(s).`
+          `Duplicados quitados: eliminadas ${data.deleted} venta(s) en ${data.duplicateGroups} grupo(s).`
         );
         await load();
       }
     } catch (err) {
-      setMessage(`Dedupe error: ${err.message}`);
+      setMessage(`Error al revisar/quitar duplicados: ${err.message}`);
     }
   }
 
@@ -495,17 +499,37 @@ export default function SalesSheet({ sellers, catalog, onOpenHistory }) {
         <a className="btn ghost" href={api.exportSalesXlsxUrl({ from, to, seller_id: sellerId })}>
           XLSX
         </a>
-        <button type="button" className="btn ghost" onClick={() => runImport(true)}>
-          Dry-run import
+        <button
+          type="button"
+          className="btn ghost"
+          onClick={() => runImport(true)}
+          title="Simula traer ventas nuevas del Excel/Sheet a la app, sin guardar cambios"
+        >
+          Probar actualización
         </button>
-        <button type="button" className="btn secondary" onClick={() => runImport(false)}>
-          Importar hoja
+        <button
+          type="button"
+          className="btn secondary"
+          onClick={() => runImport(false)}
+          title="Cuando agregas ventas en el Sheet/Excel y quieres verlas en la app (no borra las ya cargadas)"
+        >
+          Actualizar ventas desde Excel
         </button>
-        <button type="button" className="btn ghost" onClick={() => runDedupe(true)}>
-          Dry-run dedupe
+        <button
+          type="button"
+          className="btn ghost"
+          onClick={() => runDedupe(true)}
+          title="Muestra grupos de ventas gemelas sin borrar nada"
+        >
+          Revisar duplicados
         </button>
-        <button type="button" className="btn secondary" onClick={() => runDedupe(false)}>
-          Limpiar dupes Alejandra
+        <button
+          type="button"
+          className="btn secondary"
+          onClick={() => runDedupe(false)}
+          title="Elimina ventas duplicadas verdaderas; conserva la más antigua"
+        >
+          Quitar ventas duplicadas
         </button>
       </div>
 
